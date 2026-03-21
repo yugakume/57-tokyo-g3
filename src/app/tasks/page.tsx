@@ -182,10 +182,10 @@ export default function TasksPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-4 py-6 sm:py-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">タスク管理</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">タスク管理</h1>
         <button
           onClick={() => setShowAddModal(true)}
           className="flex items-center gap-1.5 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -196,12 +196,12 @@ export default function TasksPage() {
       </div>
 
       {/* Filter */}
-      <div className="flex items-center gap-3 mb-6">
-        <label className="text-sm text-gray-600 dark:text-gray-400">担当者で絞り込み:</label>
+      <div className="flex items-center gap-3 mb-6 flex-wrap">
+        <label className="text-sm text-gray-600 dark:text-gray-400 shrink-0">担当者で絞り込み:</label>
         <select
           value={filterAssignee}
           onChange={e => setFilterAssignee(e.target.value)}
-          className="px-3 py-1.5 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="px-3 py-1.5 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0 max-w-full"
         >
           <option value="all">すべて</option>
           {assigneeOptions.map(email => (
@@ -211,7 +211,7 @@ export default function TasksPage() {
           ))}
         </select>
         <span className="text-xs text-gray-400 ml-auto">{filteredTasks.length}件</span>
-        <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 ml-4 cursor-pointer select-none">
+        <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 sm:ml-4 cursor-pointer select-none">
           <input
             type="checkbox"
             checked={hideDone}

@@ -11,7 +11,7 @@ const ALLOWED_DOMAIN = "dot-jp.or.jp";
 // Google Cloud Console で取得した OAuth クライアントID をここに設定
 // 手順: https://console.cloud.google.com → APIとサービス → 認証情報 → OAuth 2.0 クライアントID
 // 承認済みの JavaScript 生成元にデプロイ先のドメインを追加すること
-export const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com";
+export const GOOGLE_CLIENT_ID = "346842421426-kthmpbq2kndbahrh197i7bhldcab9uql.apps.googleusercontent.com";
 
 // デモモードフラグ（本番デプロイ時は false にする）
 // true の場合: メールアドレス入力でのデモログインが有効
@@ -93,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Google Identity Services スクリプト読み込み
   useEffect(() => {
-    if (GOOGLE_CLIENT_ID === "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com") return;
+    if ((GOOGLE_CLIENT_ID as string) === "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com") return;
     if (document.getElementById("gsi-script")) return;
 
     const script = document.createElement("script");
@@ -129,7 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Google OAuth ログイン
   const loginWithGoogle = useCallback(() => {
-    if (GOOGLE_CLIENT_ID === "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com") {
+    if ((GOOGLE_CLIENT_ID as string) === "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com") {
       alert(
         "Google OAuth が未設定です。\n\n" +
         "AuthContext.tsx の GOOGLE_CLIENT_ID に\n" +

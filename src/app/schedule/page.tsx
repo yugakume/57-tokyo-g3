@@ -664,7 +664,7 @@ function BookingsTab({
                       {EVENT_TYPE_LABELS[booking.eventType]}
                     </span>
                   </div>
-                  <div className="text-xs text-gray-400 mt-1">
+                  <div className="text-xs text-gray-400 mt-1 break-all">
                     {booking.studentEmail} / {booking.bookingNumber}
                   </div>
                 </div>
@@ -690,7 +690,7 @@ function BookingsTab({
                       );
                     })()}
                     {booking.meetLink && (
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 text-xs text-blue-700">
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 text-xs text-blue-700 break-all">
                         Meet: {booking.meetLink}
                       </div>
                     )}
@@ -731,10 +731,10 @@ function BookingsTab({
 
               {/* Actions */}
               {booking.status === "pending" && (
-                <div className="flex gap-2 pt-2 border-t border-gray-100">
+                <div className="flex gap-2 pt-2 border-t border-gray-100 flex-wrap">
                   {confirmingBookingId === booking.id ? (
                     <>
-                      <p className="text-xs text-blue-600 flex-1 self-center">枠を選択して「確定」を押してください</p>
+                      <p className="text-xs text-blue-600 flex-1 self-center min-w-[150px]">枠を選択して「確定」を押してください</p>
                       <button
                         onClick={() => { setConfirmingBookingId(null); setSelectedSlotId(null); }}
                         className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"

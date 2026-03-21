@@ -165,9 +165,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     {displayName.charAt(0).toUpperCase()}
                   </span>
                 </div>
-                <div className="text-left">
-                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{displayName}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{user.email}</p>
+                <div className="text-left min-w-0">
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{displayName}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{user.email}</p>
                 </div>
               </div>
             </button>
@@ -268,8 +268,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 md:ml-56">
-        {children}
+      <main className="flex-1 md:ml-56 flex flex-col min-h-screen">
+        <div className="flex-1">
+          {children}
+        </div>
+        <footer className="border-t border-gray-200 dark:border-gray-800 py-4 px-4 text-center">
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            © 2026{" "}
+            <a
+              href="https://yugaku.me/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-blue-500 dark:hover:text-blue-400 transition-colors underline underline-offset-2"
+            >
+              Yuga Kume
+            </a>
+            . All rights reserved.
+          </p>
+        </footer>
       </main>
 
       {/* Profile modal */}

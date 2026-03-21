@@ -101,7 +101,7 @@ export default function AccountsPage() {
                 <div>
                   <p className="text-xs text-gray-400 mb-1">ログインID</p>
                   <div className="flex items-center gap-2">
-                    <code className="flex-1 bg-gray-50 dark:bg-gray-900 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-gray-100 font-mono select-all">
+                    <code className="flex-1 bg-gray-50 dark:bg-gray-900 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-gray-100 font-mono select-all break-all min-w-0">
                       {acc.loginId}
                     </code>
                     <button
@@ -121,7 +121,7 @@ export default function AccountsPage() {
                 <div>
                   <p className="text-xs text-gray-400 mb-1">パスワード</p>
                   <div className="flex items-center gap-2">
-                    <code className="flex-1 bg-gray-50 dark:bg-gray-900 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-gray-100 font-mono select-all">
+                    <code className="flex-1 bg-gray-50 dark:bg-gray-900 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-gray-100 font-mono select-all break-all min-w-0">
                       {visiblePasswords.has(acc.id) ? acc.password : "••••••••••"}
                     </code>
                     <button
