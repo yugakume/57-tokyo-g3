@@ -366,13 +366,28 @@ function ProfileModal({
   const [university, setUniversity] = useState(profile?.university ?? "");
   const [faculty, setFaculty] = useState(profile?.faculty ?? "");
   const [photoURL, setPhotoURL] = useState(profile?.photoURL ?? "");
+  const [birthdayYear, setBirthdayYear] = useState(() => {
+    if (!profile?.birthday) return "";
+    const parts = profile.birthday.split("-");
+    // YYYY-MM-DD形式の場合
+    if (parts.length === 3 && parts[0].length === 4) return parts[0];
+    return "";
+  });
   const [birthdayMonth, setBirthdayMonth] = useState(() => {
     if (!profile?.birthday) return "";
-    return profile.birthday.split("-")[0] || "";
+    const parts = profile.birthday.split("-");
+    // YYYY-MM-DD形式の場合
+    if (parts.length === 3 && parts[0].length === 4) return parts[1] || "";
+    // 旧MM-DD形式の場合
+    return parts[0] || "";
   });
   const [birthdayDay, setBirthdayDay] = useState(() => {
     if (!profile?.birthday) return "";
-    return profile.birthday.split("-")[1] || "";
+    const parts = profile.birthday.split("-");
+    // YYYY-MM-DD形式の場合
+    if (parts.length === 3 && parts[0].length === 4) return parts[2] || "";
+    // 旧MM-DD形式の場合
+    return parts[1] || "";
   });
 
   const roleNames = useMemo(() => {
@@ -386,8 +401,8 @@ function ProfileModal({
     if (!lastName.trim()) return;
     const fullName = (lastName.trim() + firstName.trim()) || undefined;
     const furigana = (furiganaLast.trim() + furiganaFirst.trim()) || undefined;
-    const birthday = birthdayMonth && birthdayDay
-      ? `${birthdayMonth.padStart(2, "0")}-${birthdayDay.padStart(2, "0")}`
+    const birthday = birthdayYear && birthdayMonth && birthdayDay
+      ? `${birthdayYear}-${birthdayMonth.padStart(2, "0")}-${birthdayDay.padStart(2, "0")}`
       : undefined;
     onSave({
       lastName: lastName.trim(),
@@ -459,7 +474,7 @@ function ProfileModal({
                 type="text"
                 value={lastName}
                 onChange={e => setLastName(e.target.value)}
-                placeholder="久米"
+                placeholder="ドット"
                 className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -469,7 +484,7 @@ function ProfileModal({
                 type="text"
                 value={firstName}
                 onChange={e => setFirstName(e.target.value)}
-                placeholder="悠雅"
+                placeholder="太郎"
                 className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -483,7 +498,7 @@ function ProfileModal({
                 type="text"
                 value={furiganaLast}
                 onChange={e => setFuriganaLast(e.target.value)}
-                placeholder="くめ"
+                placeholder="どっと"
                 className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -493,7 +508,7 @@ function ProfileModal({
                 type="text"
                 value={furiganaFirst}
                 onChange={e => setFuriganaFirst(e.target.value)}
-                placeholder="ゆうが"
+                placeholder="たろう"
                 className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -506,19 +521,30 @@ function ProfileModal({
               type="text"
               value={nearestStation}
               onChange={e => setNearestStation(e.target.value)}
-              placeholder="渋谷駅"
+              placeholder="参宮橋駅 / 代々木八幡バス停"
               className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">バス停も入力可能です</p>
           </div>
 
           {/* Birthday */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">誕生日</label>
-            <div className="grid grid-cols-2 gap-3">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">生年月日</label>
+            <div className="grid grid-cols-3 gap-2">
+              <select
+                value={birthdayYear}
+                onChange={e => setBirthdayYear(e.target.value)}
+                className="w-full px-2 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">年</option>
+                {Array.from({ length: 2010 - 1990 + 1 }, (_, i) => 1990 + i).map(y => (
+                  <option key={y} value={String(y)}>{y}年</option>
+                ))}
+              </select>
               <select
                 value={birthdayMonth}
                 onChange={e => setBirthdayMonth(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-2 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">月</option>
                 {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
@@ -528,7 +554,7 @@ function ProfileModal({
               <select
                 value={birthdayDay}
                 onChange={e => setBirthdayDay(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-2 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">日</option>
                 {Array.from({ length: 31 }, (_, i) => i + 1).map(d => (

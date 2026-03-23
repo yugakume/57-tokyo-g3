@@ -214,14 +214,20 @@ export default function MembersPage() {
                       </div>
                     )}
 
-                    {/* 誕生日 */}
+                    {/* 生年月日 */}
                     {profile.birthday && (
                       <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
                         <svg className="w-4 h-4 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                           <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
                           <circle cx="12" cy="7" r="4" />
                         </svg>
-                        <span>{parseInt(profile.birthday.split("-")[0])}月{parseInt(profile.birthday.split("-")[1])}日</span>
+                        <span>{(() => {
+                          const parts = profile.birthday.split("-");
+                          if (parts.length === 3 && parts[0].length === 4) {
+                            return `${parseInt(parts[0])}年${parseInt(parts[1])}月${parseInt(parts[2])}日`;
+                          }
+                          return `${parseInt(parts[0])}月${parseInt(parts[1])}日`;
+                        })()}</span>
                       </div>
                     )}
 

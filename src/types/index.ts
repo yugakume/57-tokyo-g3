@@ -103,7 +103,7 @@ export interface StaffProfile {
   gender: "male" | "female" | "other";
   roleIds: string[];       // StaffRole.id の配列
   nearestStation?: string; // 最寄駅
-  birthday?: string;       // 誕生日 (MM-DD形式, e.g. "03-21")
+  birthday?: string;       // 生年月日 (YYYY-MM-DD形式, e.g. "2003-03-21")
   university?: string;     // 大学名
   faculty?: string;        // 学部・学科
   photoURL?: string;       // 顔写真（base64 data URL）

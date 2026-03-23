@@ -49,7 +49,7 @@ export default function AdminPage() {
   const [newAdminEmail, setNewAdminEmail] = useState("");
 
   // Role management
-  const { staffRoles, addStaffRole, updateStaffRole, deleteStaffRole } = useSchedule();
+  const { staffRoles, addStaffRole, updateStaffRole, deleteStaffRole, staffProfiles, addStaffProfile, deleteStaffProfile } = useSchedule();
   const [newRoleName, setNewRoleName] = useState("");
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
   const [editingRoleName, setEditingRoleName] = useState("");
@@ -175,6 +175,22 @@ export default function AdminPage() {
       return;
     }
     addAllowedEmail(email);
+    // staffProfileが存在しなければ自動作成
+    const existingProfile = staffProfiles.find(p => p.email === email);
+    if (!existingProfile) {
+      addStaffProfile({
+        email,
+        lastName: "",
+        fullName: "",
+        furigana: "",
+        grade: "",
+        gender: "other" as const,
+        roleIds: [],
+        nearestStation: "",
+        birthday: "",
+        university: "",
+      });
+    }
     setNewEmail("");
     setToast("メールアドレスを追加しました");
   };
@@ -478,6 +494,11 @@ export default function AdminPage() {
                         onClick={() => {
                           if (confirm(`${email} を許可リストから削除しますか？`)) {
                             removeAllowedEmail(email);
+                            // 対応するstaffProfileも削除
+                            const profileToDelete = staffProfiles.find(p => p.email === email);
+                            if (profileToDelete) {
+                              deleteStaffProfile(profileToDelete.id);
+                            }
                             setToast("メールアドレスを削除しました");
                           }
                         }}
