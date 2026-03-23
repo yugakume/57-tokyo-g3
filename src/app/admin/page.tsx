@@ -203,6 +203,26 @@ export default function AdminPage() {
       return;
     }
     addAdminEmail(email);
+    // 許可メールにも追加（管理者は当然ログイン可能）
+    if (!allowedEmails.includes(email)) {
+      addAllowedEmail(email);
+    }
+    // staffProfileが存在しなければ自動作成
+    const existingProfile = staffProfiles.find(p => p.email === email);
+    if (!existingProfile) {
+      addStaffProfile({
+        email,
+        lastName: "",
+        fullName: "",
+        furigana: "",
+        grade: "",
+        gender: "other" as const,
+        roleIds: [],
+        nearestStation: "",
+        birthday: "",
+        university: "",
+      });
+    }
     setNewAdminEmail("");
     setToast("管理者を追加しました");
   };
