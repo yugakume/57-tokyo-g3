@@ -49,7 +49,7 @@ function ChevronDownIcon({ className }: { className?: string }) {
   );
 }
 
-function ThemeToggle() {
+function ThemeToggle({ dropUp = false }: { dropUp?: boolean }) {
   const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
 
@@ -75,7 +75,9 @@ function ThemeToggle() {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 mb-1 w-full bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg z-50 overflow-hidden">
+          <div className={`absolute left-0 w-full bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg z-50 overflow-hidden ${
+            dropUp ? "bottom-full mb-1" : "top-full mt-1"
+          }`}>
             {options.map(opt => (
               <button
                 key={opt.value}
@@ -233,7 +235,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="px-3 py-3 border-t border-gray-100 dark:border-gray-700">
           {/* Theme toggle */}
           <div className="px-3 py-2 mb-2">
-            <ThemeToggle />
+            <ThemeToggle dropUp />
           </div>
 
           <button
@@ -311,6 +313,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 university: data.university,
                 faculty: data.faculty,
                 photoURL: data.photoURL,
+                birthday: data.birthday,
               });
             }
             setProfileOpen(false);

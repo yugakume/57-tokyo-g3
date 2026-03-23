@@ -58,34 +58,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // 初期化: Firestoreから許可メール・管理者メールをリアルタイム購読
   useEffect(() => {
-    const stored = localStorage.getItem("portal_user");
-    if (stored) {
-      try {
-        setUser(JSON.parse(stored));
-      } catch {
-        localStorage.removeItem("portal_user");
-      }
-    }
-    setIsLoading(false);
+    // Firestoreから許可メールリストを購読してからユーザーを復元
+    let loadedAllowed: string[] = [];
+    let loadedAdmin: string[] = [];
+    let allowedReady = false;
+    let adminReady = false;
 
-    // Firestoreから許可メールリストを購読
+    const checkAndRestoreUser = () => {
+      if (!allowedReady || !adminReady) return;
+      // localStorageからユーザー復元（許可チェック付き）
+      const stored = localStorage.getItem("portal_user");
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          const email = parsed.email;
+          const domain = email?.split("@")[1];
+          // ドメインチェック + 許可メールチェック
+          if (domain === ALLOWED_DOMAIN && (loadedAllowed.includes(email) || loadedAdmin.includes(email))) {
+            // 管理者権限を最新に更新
+            parsed.role = loadedAdmin.includes(email) ? "admin" : "member";
+            setUser(parsed);
+            localStorage.setItem("portal_user", JSON.stringify(parsed));
+          } else {
+            // 許可されていないユーザーはログアウト
+            localStorage.removeItem("portal_user");
+          }
+        } catch {
+          localStorage.removeItem("portal_user");
+        }
+      }
+      setIsLoading(false);
+    };
+
     const unsubAllowed = onSnapshot(doc(db, "settings", "allowedEmails"), (snap) => {
       if (snap.exists()) {
-        setAllowedEmails(snap.data().emails ?? []);
+        loadedAllowed = snap.data().emails ?? [];
+        setAllowedEmails(loadedAllowed);
       } else {
-        // 初回: デフォルト管理者のみ許可
         setDoc(doc(db, "settings", "allowedEmails"), { emails: DEFAULT_ADMIN_EMAILS });
+        loadedAllowed = DEFAULT_ADMIN_EMAILS;
         setAllowedEmails(DEFAULT_ADMIN_EMAILS);
       }
+      allowedReady = true;
+      checkAndRestoreUser();
     });
 
     const unsubAdmin = onSnapshot(doc(db, "settings", "adminEmails"), (snap) => {
       if (snap.exists()) {
-        setAdminEmails(snap.data().emails ?? []);
+        loadedAdmin = snap.data().emails ?? [];
+        setAdminEmails(loadedAdmin);
       } else {
         setDoc(doc(db, "settings", "adminEmails"), { emails: DEFAULT_ADMIN_EMAILS });
+        loadedAdmin = DEFAULT_ADMIN_EMAILS;
         setAdminEmails(DEFAULT_ADMIN_EMAILS);
       }
+      adminReady = true;
+      checkAndRestoreUser();
     });
 
     return () => { unsubAllowed(); unsubAdmin(); };
