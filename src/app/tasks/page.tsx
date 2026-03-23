@@ -341,7 +341,7 @@ function TaskCard({
   currentUserEmail: string;
   isCompleting?: boolean;
 }) {
-  const priorityCfg = PRIORITY_CONFIG[task.priority];
+  const priorityCfg = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG.medium;
   const today = getTodayStr();
   const isOverdue = task.dueDate && task.dueDate < today && task.status !== "done";
   const emails = task.assigneeEmails || [];
