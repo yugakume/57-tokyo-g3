@@ -499,6 +499,14 @@ function MinutesModal({
   onSave: (data: Omit<MeetingMinutes, "id" | "createdAt" | "updatedAt">) => void;
   onClose: () => void;
 }) {
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [onClose]);
+
   const [date, setDate] = useState(initial?.date ?? getNextSaturday());
   const [title, setTitle] = useState(initial?.title ?? "定例MTG");
   const [startTime, setStartTime] = useState(initial?.startTime ?? "09:00");

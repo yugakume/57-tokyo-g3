@@ -411,6 +411,14 @@ function AddSlotModal({
   onAdd: (slots: Omit<TimeSlot, "id">[]) => void;
   onClose: () => void;
 }) {
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [onClose]);
+
   const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [startTime, setStartTime] = useState("10:00");
   const [eventType, setEventType] = useState<EventType>("orientation");

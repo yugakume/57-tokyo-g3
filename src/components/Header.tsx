@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -342,6 +342,14 @@ function ProfileModal({
   onSave: (data: Partial<StaffProfile>) => void;
   onClose: () => void;
 }) {
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [onClose]);
+
   const [lastName, setLastName] = useState(profile?.lastName ?? "");
   const [firstName, setFirstName] = useState(profile?.firstName ?? "");
   // ふりがなを姓・名に分割（結合されている場合は姓側に入れる）

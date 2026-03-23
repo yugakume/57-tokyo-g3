@@ -135,6 +135,18 @@ export default function DashboardPage() {
   });
   const [showCustomizeModal, setShowCustomizeModal] = useState(false);
 
+  // ESCキーでカスタマイズモーダル / カウントダウンフォームを閉じる
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (showCustomizeModal) setShowCustomizeModal(false);
+        if (showCountdownForm) { setShowCountdownForm(false); setNewCountdownTitle(""); setNewCountdownDate(""); }
+      }
+    };
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [showCustomizeModal, showCountdownForm]);
+
   // localStorageから読み込み
   useEffect(() => {
     if (typeof window === "undefined") return;
