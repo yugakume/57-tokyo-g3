@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import type { StaffProfile, TimeSlot, Booking, EventType, BookingStatus, StaffRole } from "@/types";
-import { DEFAULT_STAFF_ROLES } from "@/types";
 import { db } from "@/lib/firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch } from "firebase/firestore";
 
@@ -53,106 +52,6 @@ function generateBookingNumber(): string {
 }
 
 // =============================================
-// デモデータ
-// =============================================
-
-const DEFAULT_STAFF: StaffProfile[] = [
-  { id: "staff-0", email: "yuga_kume@dot-jp.or.jp", lastName: "久米", firstName: "悠雅", fullName: "久米悠雅", furigana: "くめゆうが", grade: "3年", gender: "male" as const, roleIds: ["role-01"], nearestStation: "東京駅", birthday: "08-15", university: "早稲田大学", faculty: "政治経済学部 経済学科" },
-  { id: "staff-1", email: "tanaka@dot-jp.or.jp", lastName: "田中", firstName: "太郎", fullName: "田中太郎", furigana: "たなかたろう", grade: "3年", gender: "male", roleIds: ["role-03"], nearestStation: "渋谷駅", birthday: "05-10", university: "慶應義塾大学", faculty: "法学部 法律学科" },
-  { id: "staff-2", email: "sato@dot-jp.or.jp", lastName: "佐藤", firstName: "花子", fullName: "佐藤花子", furigana: "さとうはなこ", grade: "2年", gender: "female", roleIds: ["role-04"], nearestStation: "新宿駅", birthday: "03-21", university: "上智大学", faculty: "総合グローバル学部" },
-  { id: "staff-3", email: "suzuki@dot-jp.or.jp", lastName: "鈴木", firstName: "一郎", fullName: "鈴木一郎", furigana: "すずきいちろう", grade: "4年", gender: "male", roleIds: ["role-01", "role-08"], nearestStation: "池袋駅", birthday: "11-03", university: "東京大学", faculty: "文学部 社会学科" },
-];
-
-function generateDefaultSlots(): TimeSlot[] {
-  const slots: TimeSlot[] = [];
-  const today = new Date();
-  const timeRanges = [
-    { start: "10:00", end: "11:00" },
-    { start: "10:30", end: "11:30" },
-    { start: "11:00", end: "12:00" },
-    { start: "11:30", end: "12:30" },
-    { start: "13:00", end: "14:00" },
-    { start: "13:30", end: "14:30" },
-    { start: "14:00", end: "15:00" },
-    { start: "14:30", end: "15:30" },
-    { start: "15:00", end: "16:00" },
-    { start: "15:30", end: "16:30" },
-    { start: "16:00", end: "17:00" },
-  ];
-
-  let slotIndex = 1;
-  for (let day = 1; day <= 7; day++) {
-    const date = new Date(today);
-    date.setDate(today.getDate() + day);
-    const dateStr = date.toISOString().split("T")[0];
-
-    for (const staff of DEFAULT_STAFF) {
-      const staffTimes = timeRanges.filter((_, i) => {
-        const seed = day * 10 + parseInt(staff.id.split("-")[1]) + i;
-        return seed % 4 !== 0;
-      });
-
-      for (const time of staffTimes) {
-        slots.push({
-          id: `slot-${slotIndex++}`,
-          staffId: staff.id,
-          date: dateStr,
-          startTime: time.start,
-          endTime: time.end,
-          eventType: "orientation",
-          isBooked: false,
-        });
-      }
-    }
-  }
-
-  if (slots.length >= 5) {
-    slots[0].isBooked = true;
-    slots[0].bookingId = "booking-1";
-    slots[2].isBooked = true;
-    slots[2].bookingId = "booking-2";
-  }
-
-  return slots;
-}
-
-function generateDefaultBookings(slots: TimeSlot[]): Booking[] {
-  const now = new Date().toISOString();
-  const bookings: Booking[] = [];
-
-  const pendingSlotIds = slots.filter(s => !s.isBooked).slice(0, 3).map(s => s.id);
-  bookings.push({
-    id: "booking-1",
-    bookingNumber: "BK-D3M0A1",
-    studentName: "山田太郎",
-    studentEmail: "yamada@example.com",
-    selectedSlotIds: pendingSlotIds,
-    eventType: "orientation",
-    status: "pending" as BookingStatus,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  const confirmedSlot = slots.find(s => s.isBooked && s.bookingId === "booking-2");
-  bookings.push({
-    id: "booking-2",
-    bookingNumber: "BK-D3M0B2",
-    studentName: "鈴木花子",
-    studentEmail: "suzuki.hanako@example.com",
-    selectedSlotIds: confirmedSlot ? [confirmedSlot.id] : [],
-    confirmedSlotId: confirmedSlot?.id,
-    assignedStaffId: confirmedSlot?.staffId,
-    eventType: "orientation",
-    meetLink: "https://meet.google.com/abc-defg-hij",
-    status: "confirmed" as BookingStatus,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  return bookings;
-}
-
-// =============================================
 // Provider
 // =============================================
 
@@ -166,9 +65,6 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
 
   // Firestoreリアルタイムリスナー（全コレクション）
   useEffect(() => {
-    const defaultSlots = generateDefaultSlots();
-    const defaultBookings = generateDefaultBookings(defaultSlots);
-
     const unsubs: (() => void)[] = [];
     let profilesLoaded = false;
     let slotsLoaded = false;
@@ -177,17 +73,6 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
 
     // staffProfiles
     unsubs.push(onSnapshot(collection(db, "staffProfiles"), (snap) => {
-      if (snap.empty && !profilesLoaded) {
-        const batch = writeBatch(db);
-        DEFAULT_STAFF.forEach(s => {
-          const { id, ...data } = s;
-          batch.set(doc(db, "staffProfiles", id), data);
-        });
-        batch.commit();
-        profilesLoaded = true;
-        checkLoaded();
-        return;
-      }
       setStaffProfiles(snap.docs.map(d => ({ ...d.data(), id: d.id })) as StaffProfile[]);
       profilesLoaded = true;
       checkLoaded();
@@ -195,17 +80,6 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
 
     // timeSlots
     unsubs.push(onSnapshot(collection(db, "timeSlots"), (snap) => {
-      if (snap.empty && !slotsLoaded) {
-        const batch = writeBatch(db);
-        defaultSlots.forEach(s => {
-          const { id, ...data } = s;
-          batch.set(doc(db, "timeSlots", id), data);
-        });
-        batch.commit();
-        slotsLoaded = true;
-        checkLoaded();
-        return;
-      }
       setTimeSlots(snap.docs.map(d => ({ ...d.data(), id: d.id })) as TimeSlot[]);
       slotsLoaded = true;
       checkLoaded();
@@ -213,17 +87,6 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
 
     // bookings
     unsubs.push(onSnapshot(collection(db, "bookings"), (snap) => {
-      if (snap.empty && !bookingsLoaded) {
-        const batch = writeBatch(db);
-        defaultBookings.forEach(b => {
-          const { id, ...data } = b;
-          batch.set(doc(db, "bookings", id), data);
-        });
-        batch.commit();
-        bookingsLoaded = true;
-        checkLoaded();
-        return;
-      }
       setBookings(snap.docs.map(d => ({ ...d.data(), id: d.id })) as Booking[]);
       bookingsLoaded = true;
       checkLoaded();
@@ -231,17 +94,6 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
 
     // staffRoles
     unsubs.push(onSnapshot(collection(db, "staffRoles"), (snap) => {
-      if (snap.empty && !rolesLoaded) {
-        const batch = writeBatch(db);
-        DEFAULT_STAFF_ROLES.forEach(r => {
-          const { id, ...data } = r;
-          batch.set(doc(db, "staffRoles", id), data);
-        });
-        batch.commit();
-        rolesLoaded = true;
-        checkLoaded();
-        return;
-      }
       setStaffRoles(snap.docs.map(d => ({ ...d.data(), id: d.id })) as StaffRole[]);
       rolesLoaded = true;
       checkLoaded();

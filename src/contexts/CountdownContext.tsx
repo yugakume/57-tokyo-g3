@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import { db } from "@/lib/firebase";
-import { collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch } from "firebase/firestore";
+import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 
 // =============================================
 // CountdownContext
@@ -24,19 +24,6 @@ interface CountdownContextType {
 const CountdownContext = createContext<CountdownContextType | undefined>(undefined);
 
 // =============================================
-// デフォルトデータ
-// =============================================
-
-const DEFAULT_COUNTDOWNS: CountdownItem[] = [
-  {
-    id: "countdown-default-1",
-    title: "来期スタート",
-    targetDate: "2026-04-01",
-    createdBy: "yuga_kume@dot-jp.or.jp",
-  },
-];
-
-// =============================================
 // Provider
 // =============================================
 
@@ -47,16 +34,6 @@ export function CountdownProvider({ children }: { children: ReactNode }) {
   // Firestoreリアルタイムリスナー
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "countdowns"), (snapshot) => {
-      if (snapshot.empty && !loaded) {
-        // 初回かつデータなし → デフォルトデータを投入
-        const batch = writeBatch(db);
-        DEFAULT_COUNTDOWNS.forEach((c) => {
-          const { id, ...data } = c;
-          batch.set(doc(db, "countdowns", id), data);
-        });
-        batch.commit();
-        return; // バッチ書き込み後にonSnapshotが再発火する
-      }
       const data = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }) as CountdownItem);
       setCountdowns(data);
       setLoaded(true);
