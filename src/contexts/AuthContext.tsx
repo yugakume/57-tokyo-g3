@@ -2,6 +2,8 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import type { User } from "@/types";
+import { db } from "@/lib/firebase";
+import { doc, onSnapshot, setDoc } from "firebase/firestore";
 
 // =============================================
 // 設定
@@ -9,34 +11,12 @@ import type { User } from "@/types";
 const ALLOWED_DOMAIN = "dot-jp.or.jp";
 
 // Google Cloud Console で取得した OAuth クライアントID をここに設定
-// 手順: https://console.cloud.google.com → APIとサービス → 認証情報 → OAuth 2.0 クライアントID
-// 承認済みの JavaScript 生成元にデプロイ先のドメインを追加すること
 export const GOOGLE_CLIENT_ID = "346842421426-kthmpbq2kndbahrh197i7bhldcab9uql.apps.googleusercontent.com";
 
 // デモモードフラグ（本番デプロイ時は false にする）
-// true の場合: メールアドレス入力でのデモログインが有効
-// false の場合: Google OAuth のみ有効
 const DEMO_MODE = true;
 
-// =============================================
-// 許可メールアドレス管理
-// =============================================
-const STORAGE_KEY_ALLOWED_EMAILS = "portal_allowed_emails";
-const STORAGE_KEY_ADMIN_EMAILS = "portal_admin_emails";
-
 const DEFAULT_ADMIN_EMAILS = ["yuga_kume@dot-jp.or.jp"];
-
-function getStoredEmails(key: string, defaults: string[]): string[] {
-  try {
-    const stored = localStorage.getItem(key);
-    if (stored) return JSON.parse(stored);
-  } catch { /* ignore */ }
-  return defaults;
-}
-
-function setStoredEmails(key: string, emails: string[]) {
-  localStorage.setItem(key, JSON.stringify(emails));
-}
 
 // =============================================
 // AuthContext
@@ -76,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [allowedEmails, setAllowedEmails] = useState<string[]>([]);
   const [adminEmails, setAdminEmails] = useState<string[]>([]);
 
-  // 初期化
+  // 初期化: Firestoreから許可メール・管理者メールをリアルタイム購読
   useEffect(() => {
     const stored = localStorage.getItem("portal_user");
     if (stored) {
@@ -86,9 +66,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem("portal_user");
       }
     }
-    setAllowedEmails(getStoredEmails(STORAGE_KEY_ALLOWED_EMAILS, []));
-    setAdminEmails(getStoredEmails(STORAGE_KEY_ADMIN_EMAILS, DEFAULT_ADMIN_EMAILS));
     setIsLoading(false);
+
+    // Firestoreから許可メールリストを購読
+    const unsubAllowed = onSnapshot(doc(db, "settings", "allowedEmails"), (snap) => {
+      if (snap.exists()) {
+        setAllowedEmails(snap.data().emails ?? []);
+      } else {
+        // 初回: デフォルト管理者のみ許可
+        setDoc(doc(db, "settings", "allowedEmails"), { emails: DEFAULT_ADMIN_EMAILS });
+        setAllowedEmails(DEFAULT_ADMIN_EMAILS);
+      }
+    });
+
+    const unsubAdmin = onSnapshot(doc(db, "settings", "adminEmails"), (snap) => {
+      if (snap.exists()) {
+        setAdminEmails(snap.data().emails ?? []);
+      } else {
+        setDoc(doc(db, "settings", "adminEmails"), { emails: DEFAULT_ADMIN_EMAILS });
+        setAdminEmails(DEFAULT_ADMIN_EMAILS);
+      }
+    });
+
+    return () => { unsubAllowed(); unsubAdmin(); };
   }, []);
 
   // Google Identity Services スクリプト読み込み
@@ -112,8 +112,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
-    const currentAdmins = getStoredEmails(STORAGE_KEY_ADMIN_EMAILS, DEFAULT_ADMIN_EMAILS);
-    const role = currentAdmins.includes(email) ? "admin" : "member";
+    // 許可メールアドレスチェック（管理者は常に許可）
+    if (!allowedEmails.includes(email) && !adminEmails.includes(email)) {
+      alert("このメールアドレスはまだ許可されていません。\n管理者に連絡してください。");
+      return false;
+    }
+
+    const role = adminEmails.includes(email) ? "admin" : "member";
 
     const newUser: User = {
       uid: uid ?? crypto.randomUUID(),
@@ -125,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(newUser);
     localStorage.setItem("portal_user", JSON.stringify(newUser));
     return true;
-  }, []);
+  }, [allowedEmails, adminEmails]);
 
   // Google OAuth ログイン
   const loginWithGoogle = useCallback(() => {
@@ -188,45 +193,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("portal_user");
   }, []);
 
-  // 管理者用：許可メール管理
-  const addAllowedEmail = useCallback((email: string) => {
-    setAllowedEmails(prev => {
-      if (prev.includes(email)) return prev;
-      const next = [...prev, email];
-      setStoredEmails(STORAGE_KEY_ALLOWED_EMAILS, next);
-      return next;
-    });
-  }, []);
+  // 管理者用：許可メール管理（Firestore保存）
+  const addAllowedEmail = useCallback(async (email: string) => {
+    const next = [...allowedEmails, email].filter((v, i, a) => a.indexOf(v) === i);
+    await setDoc(doc(db, "settings", "allowedEmails"), { emails: next });
+  }, [allowedEmails]);
 
-  const removeAllowedEmail = useCallback((email: string) => {
-    setAllowedEmails(prev => {
-      const next = prev.filter(e => e !== email);
-      setStoredEmails(STORAGE_KEY_ALLOWED_EMAILS, next);
-      return next;
-    });
-  }, []);
+  const removeAllowedEmail = useCallback(async (email: string) => {
+    const next = allowedEmails.filter(e => e !== email);
+    await setDoc(doc(db, "settings", "allowedEmails"), { emails: next });
+  }, [allowedEmails]);
 
-  const addAdminEmail = useCallback((email: string) => {
-    setAdminEmails(prev => {
-      if (prev.includes(email)) return prev;
-      const next = [...prev, email];
-      setStoredEmails(STORAGE_KEY_ADMIN_EMAILS, next);
-      return next;
-    });
-  }, []);
+  const addAdminEmail = useCallback(async (email: string) => {
+    const next = [...adminEmails, email].filter((v, i, a) => a.indexOf(v) === i);
+    await setDoc(doc(db, "settings", "adminEmails"), { emails: next });
+  }, [adminEmails]);
 
-  const removeAdminEmail = useCallback((email: string) => {
-    // 最後の管理者は削除不可
-    setAdminEmails(prev => {
-      if (prev.length <= 1) {
-        alert("管理者は最低1人必要です。");
-        return prev;
-      }
-      const next = prev.filter(e => e !== email);
-      setStoredEmails(STORAGE_KEY_ADMIN_EMAILS, next);
-      return next;
-    });
-  }, []);
+  const removeAdminEmail = useCallback(async (email: string) => {
+    if (adminEmails.length <= 1) {
+      alert("管理者は最低1人必要です。");
+      return;
+    }
+    const next = adminEmails.filter(e => e !== email);
+    await setDoc(doc(db, "settings", "adminEmails"), { emails: next });
+  }, [adminEmails]);
 
   const isAdmin = user?.role === "admin";
 
