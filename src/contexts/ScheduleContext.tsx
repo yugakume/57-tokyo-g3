@@ -144,17 +144,26 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
   // スタッフプロフィール
   // =============================================
 
+  // undefinedをFirestoreに送らないようにクリーンアップ
+  const cleanData = (obj: Record<string, unknown>) => {
+    const cleaned: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value !== undefined) cleaned[key] = value;
+    }
+    return cleaned;
+  };
+
   const addStaffProfile = useCallback((profile: Omit<StaffProfile, "id">) => {
     const id = crypto.randomUUID();
     const data = { ...profile, id };
     setStaffProfiles(prev => [...prev, data as StaffProfile]);
     const { id: _id, ...rest } = data;
-    setDoc(doc(db, "staffProfiles", id), rest);
+    setDoc(doc(db, "staffProfiles", id), cleanData(rest as Record<string, unknown>));
   }, []);
 
   const updateStaffProfile = useCallback((id: string, updates: Partial<StaffProfile>) => {
     setStaffProfiles(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
-    setDoc(doc(db, "staffProfiles", id), updates, { merge: true });
+    setDoc(doc(db, "staffProfiles", id), cleanData(updates as Record<string, unknown>), { merge: true });
   }, []);
 
   const deleteStaffProfile = useCallback((id: string) => {
