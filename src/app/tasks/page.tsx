@@ -156,17 +156,17 @@ export default function TasksPage() {
 
   const handleStatusChange = useCallback((id: string, newStatus: TaskStatus, e?: React.MouseEvent) => {
     if (newStatus === "done") {
-      // 完了アニメーション
-      setCompletedTaskId(id);
+      // 完了アニメーション — 先にステータス更新してから演出
       if (e) {
         setConfettiOrigin({ x: e.clientX, y: e.clientY });
       }
+      setCompletedTaskId(id);
+      updateTaskStatus(id, newStatus);
+      showToast("タスク完了！🎉", "done");
       setTimeout(() => {
-        updateTaskStatus(id, newStatus);
         setCompletedTaskId(null);
         setConfettiOrigin(null);
-        showToast("タスク完了！🎉", "done");
-      }, 600);
+      }, 1500);
     } else {
       updateTaskStatus(id, newStatus);
       showToast(`ステータスを「${STATUS_LABELS[newStatus]}」に変更しました`);
@@ -364,8 +364,8 @@ function TaskCard({
       onClick={onEdit}
       className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 shadow-sm transition-all duration-500 ${
         onEdit ? "cursor-pointer hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600" : ""
-      } ${isCompleting ? "scale-95 opacity-0 border-green-400 bg-green-50 dark:bg-green-900/30" : ""}`}
-      style={isCompleting ? { transform: "scale(0.95) translateY(-8px)", opacity: 0 } : undefined}
+      } ${isCompleting ? "border-green-400 bg-green-50 dark:bg-green-900/30 ring-2 ring-green-400/50" : ""}`}
+      style={isCompleting ? { transform: "scale(1.02)", transition: "all 0.3s ease" } : undefined}
     >
       {/* Title & Priority */}
       <div className="flex items-start justify-between gap-2 mb-2">
@@ -500,6 +500,14 @@ function TaskModal({
   currentUserEmail?: string;
   onUpdateCompletionStatus?: (completionStatus: Record<string, boolean>) => void;
 }) {
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [onClose]);
+
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [scopeType, setScopeType] = useState<"self" | "all" | "select">(() => {
@@ -684,37 +692,90 @@ function TaskModal({
             </div>
           )}
 
-          {/* Status & Due Date & Due Time */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ステータス</label>
-              <select
-                value={status === "in_progress" ? "todo" : status}
-                onChange={e => setStatus(e.target.value as TaskStatus)}
-                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="todo">未着手</option>
-                <option value="done">完了</option>
-              </select>
+          {/* Status */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ステータス</label>
+            <select
+              value={status === "in_progress" ? "todo" : status}
+              onChange={e => setStatus(e.target.value as TaskStatus)}
+              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="todo">未着手</option>
+              <option value="done">完了</option>
+            </select>
+          </div>
+
+          {/* Due Date - Quick select + manual */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">期限</label>
+            <div className="flex gap-1.5 mb-2 flex-wrap">
+              {(() => {
+                const today = new Date();
+                const fmt = (d: Date) => d.toISOString().split("T")[0];
+                const addDays = (n: number) => { const d = new Date(today); d.setDate(d.getDate() + n); return d; };
+                const nextDay = (dayOfWeek: number) => {
+                  const d = new Date(today);
+                  const diff = (dayOfWeek - d.getDay() + 7) % 7 || 7;
+                  d.setDate(d.getDate() + diff);
+                  return d;
+                };
+                const quickDates = [
+                  { label: "今日", date: fmt(today) },
+                  { label: "明日", date: fmt(addDays(1)) },
+                  { label: "明後日", date: fmt(addDays(2)) },
+                  { label: "今週金", date: fmt(nextDay(5)) },
+                  { label: "来週月", date: fmt(nextDay(1)) },
+                  { label: "来週土", date: fmt(nextDay(6)) },
+                ];
+                return quickDates.map(q => (
+                  <button
+                    key={q.label}
+                    type="button"
+                    onClick={() => setDueDate(q.date)}
+                    className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                      dueDate === q.date
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                        : "border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+                    }`}
+                  >
+                    {q.label}
+                  </button>
+                ));
+              })()}
+              {dueDate && (
+                <button
+                  type="button"
+                  onClick={() => { setDueDate(""); setDueTime(""); }}
+                  className="px-2.5 py-1 text-xs rounded-full border border-red-200 text-red-500 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/30 transition-colors"
+                >
+                  クリア
+                </button>
+              )}
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">期限日</label>
+            <div className="grid grid-cols-2 gap-3">
               <input
                 type="date"
                 value={dueDate}
                 onChange={e => setDueDate(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">期限時間</label>
               <input
                 type="time"
                 value={dueTime}
                 onChange={e => setDueTime(e.target.value)}
+                placeholder="時間（任意）"
                 className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
+            {dueDate && (
+              <p className="text-xs text-gray-400 mt-1">
+                {(() => {
+                  const d = new Date(dueDate + "T00:00:00");
+                  const days = ["日", "月", "火", "水", "木", "金", "土"];
+                  return `${d.getMonth() + 1}月${d.getDate()}日（${days[d.getDay()]}）${dueTime ? " " + dueTime : ""}`;
+                })()}
+              </p>
+            )}
           </div>
 
           {/* Team task: completion status per member */}
@@ -807,6 +868,14 @@ function MailtoModal({
   staffProfiles: { email: string; lastName: string }[];
   onClose: () => void;
 }) {
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [onClose]);
+
   const taskEmails = task.assigneeEmails || [];
   const isAll = taskEmails.length === 1 && taskEmails[0] === "all";
   const allEmails = isAll
