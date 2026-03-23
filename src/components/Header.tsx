@@ -418,6 +418,7 @@ function ProfileModal({
       faculty: faculty.trim() || undefined,
       photoURL: photoURL || undefined,
     });
+    onClose();
   };
 
   return (
