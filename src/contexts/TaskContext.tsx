@@ -2,6 +2,8 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import type { Task, TaskStatus, TaskPriority } from "@/types";
+import { db } from "@/lib/firebase";
+import { collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch } from "firebase/firestore";
 
 // =============================================
 // TaskContext
@@ -16,27 +18,6 @@ interface TaskContextType {
 }
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
-
-// =============================================
-// localStorage helpers
-// =============================================
-
-const STORAGE_KEY = "portal_tasks";
-
-function loadFromStorage(): Task[] | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveToStorage(data: Task[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-}
 
 // =============================================
 // デフォルトデータ: サンプルタスク
@@ -136,33 +117,26 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loaded, setLoaded] = useState(false);
 
-  // 初期ロード（旧assigneeEmail→assigneeEmails移行対応）
+  // Firestoreリアルタイムリスナー
   useEffect(() => {
-    const stored = loadFromStorage();
-    if (stored && stored.length > 0) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const migrated = stored.map((t: any) => {
-        if (!t.assigneeEmails && t.assigneeEmail) {
-          return { ...t, assigneeEmails: [t.assigneeEmail] };
-        }
-        return t;
-      });
-      setTasks(migrated);
-      saveToStorage(migrated);
-    } else {
-      const defaults = generateDefaultTasks();
-      setTasks(defaults);
-      saveToStorage(defaults);
-    }
-    setLoaded(true);
-  }, []);
-
-  // 変更時に保存
-  useEffect(() => {
-    if (loaded) {
-      saveToStorage(tasks);
-    }
-  }, [tasks, loaded]);
+    const unsub = onSnapshot(collection(db, "tasks"), (snapshot) => {
+      if (snapshot.empty && !loaded) {
+        // 初回かつデータなし → デフォルトデータを投入
+        const defaults = generateDefaultTasks();
+        const batch = writeBatch(db);
+        defaults.forEach((t) => {
+          const { id, ...data } = t;
+          batch.set(doc(db, "tasks", id), data);
+        });
+        batch.commit();
+        return; // バッチ書き込み後にonSnapshotが再発火する
+      }
+      const data = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }) as Task);
+      setTasks(data);
+      setLoaded(true);
+    });
+    return () => unsub();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addTask = useCallback((t: Omit<Task, "id" | "createdAt" | "updatedAt">): Task => {
     const now = new Date().toISOString();
@@ -172,28 +146,31 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       createdAt: now,
       updatedAt: now,
     };
-    setTasks(prev => [newTask, ...prev]);
+    setTasks((prev) => [newTask, ...prev]);
+    const { id, ...data } = newTask;
+    setDoc(doc(db, "tasks", id), data);
     return newTask;
   }, []);
 
   const updateTask = useCallback((id: string, updates: Partial<Task>) => {
-    setTasks(prev =>
-      prev.map(t =>
-        t.id === id ? { ...t, ...updates, updatedAt: new Date().toISOString() } : t
-      )
+    const updatedAt = new Date().toISOString();
+    setTasks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, ...updates, updatedAt } : t))
     );
+    setDoc(doc(db, "tasks", id), { ...updates, updatedAt }, { merge: true });
   }, []);
 
   const deleteTask = useCallback((id: string) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
+    setTasks((prev) => prev.filter((t) => t.id !== id));
+    deleteDoc(doc(db, "tasks", id));
   }, []);
 
   const updateTaskStatus = useCallback((id: string, status: TaskStatus) => {
-    setTasks(prev =>
-      prev.map(t =>
-        t.id === id ? { ...t, status, updatedAt: new Date().toISOString() } : t
-      )
+    const updatedAt = new Date().toISOString();
+    setTasks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, status, updatedAt } : t))
     );
+    setDoc(doc(db, "tasks", id), { status, updatedAt }, { merge: true });
   }, []);
 
   return (

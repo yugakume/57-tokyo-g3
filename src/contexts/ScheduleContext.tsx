@@ -3,6 +3,8 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import type { StaffProfile, TimeSlot, Booking, EventType, BookingStatus, StaffRole } from "@/types";
 import { DEFAULT_STAFF_ROLES } from "@/types";
+import { db } from "@/lib/firebase";
+import { collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch } from "firebase/firestore";
 
 // =============================================
 // ScheduleContext
@@ -36,28 +38,6 @@ interface ScheduleContextType {
 }
 
 const ScheduleContext = createContext<ScheduleContextType | undefined>(undefined);
-
-// =============================================
-// ストレージ
-// =============================================
-
-const STORAGE_KEY_STAFF = "portal_staff_profiles";
-const STORAGE_KEY_SLOTS = "portal_time_slots";
-const STORAGE_KEY_BOOKINGS = "portal_bookings";
-const STORAGE_KEY_ROLES = "portal_staff_roles";
-
-function loadFromStorage<T>(key: string, defaultValue: T): T {
-  if (typeof window === "undefined") return defaultValue;
-  const stored = localStorage.getItem(key);
-  if (stored) {
-    try { return JSON.parse(stored); } catch { return defaultValue; }
-  }
-  return defaultValue;
-}
-
-function saveToStorage<T>(key: string, value: T) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
 
 // =============================================
 // 予約番号生成
@@ -107,7 +87,6 @@ function generateDefaultSlots(): TimeSlot[] {
     const dateStr = date.toISOString().split("T")[0];
 
     for (const staff of DEFAULT_STAFF) {
-      // 各スタッフに日ごとに数枠を割り当て（シード的に決定しデモ再現性を確保）
       const staffTimes = timeRanges.filter((_, i) => {
         const seed = day * 10 + parseInt(staff.id.split("-")[1]) + i;
         return seed % 4 !== 0;
@@ -127,7 +106,6 @@ function generateDefaultSlots(): TimeSlot[] {
     }
   }
 
-  // デモ予約用にいくつかの枠を予約済みにする
   if (slots.length >= 5) {
     slots[0].isBooked = true;
     slots[0].bookingId = "booking-1";
@@ -142,7 +120,6 @@ function generateDefaultBookings(slots: TimeSlot[]): Booking[] {
   const now = new Date().toISOString();
   const bookings: Booking[] = [];
 
-  // 1件目: pending（未確定）
   const pendingSlotIds = slots.filter(s => !s.isBooked).slice(0, 3).map(s => s.id);
   bookings.push({
     id: "booking-1",
@@ -156,7 +133,6 @@ function generateDefaultBookings(slots: TimeSlot[]): Booking[] {
     updatedAt: now,
   });
 
-  // 2件目: confirmed（確定済み、Meetリンクあり）
   const confirmedSlot = slots.find(s => s.isBooked && s.bookingId === "booking-2");
   bookings.push({
     id: "booking-2",
@@ -186,55 +162,128 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [staffRoles, setStaffRoles] = useState<StaffRole[]>([]);
 
-  // 初期化
+  const [loaded, setLoaded] = useState(false);
+
+  // Firestoreリアルタイムリスナー（全コレクション）
   useEffect(() => {
     const defaultSlots = generateDefaultSlots();
     const defaultBookings = generateDefaultBookings(defaultSlots);
 
-    setStaffProfiles(loadFromStorage(STORAGE_KEY_STAFF, DEFAULT_STAFF));
-    setTimeSlots(loadFromStorage(STORAGE_KEY_SLOTS, defaultSlots));
-    setBookings(loadFromStorage(STORAGE_KEY_BOOKINGS, defaultBookings));
-    setStaffRoles(loadFromStorage(STORAGE_KEY_ROLES, DEFAULT_STAFF_ROLES));
-  }, []);
+    const unsubs: (() => void)[] = [];
+    let profilesLoaded = false;
+    let slotsLoaded = false;
+    let bookingsLoaded = false;
+    let rolesLoaded = false;
+
+    // staffProfiles
+    unsubs.push(onSnapshot(collection(db, "staffProfiles"), (snap) => {
+      if (snap.empty && !profilesLoaded) {
+        const batch = writeBatch(db);
+        DEFAULT_STAFF.forEach(s => {
+          const { id, ...data } = s;
+          batch.set(doc(db, "staffProfiles", id), data);
+        });
+        batch.commit();
+        profilesLoaded = true;
+        checkLoaded();
+        return;
+      }
+      setStaffProfiles(snap.docs.map(d => ({ ...d.data(), id: d.id })) as StaffProfile[]);
+      profilesLoaded = true;
+      checkLoaded();
+    }));
+
+    // timeSlots
+    unsubs.push(onSnapshot(collection(db, "timeSlots"), (snap) => {
+      if (snap.empty && !slotsLoaded) {
+        const batch = writeBatch(db);
+        defaultSlots.forEach(s => {
+          const { id, ...data } = s;
+          batch.set(doc(db, "timeSlots", id), data);
+        });
+        batch.commit();
+        slotsLoaded = true;
+        checkLoaded();
+        return;
+      }
+      setTimeSlots(snap.docs.map(d => ({ ...d.data(), id: d.id })) as TimeSlot[]);
+      slotsLoaded = true;
+      checkLoaded();
+    }));
+
+    // bookings
+    unsubs.push(onSnapshot(collection(db, "bookings"), (snap) => {
+      if (snap.empty && !bookingsLoaded) {
+        const batch = writeBatch(db);
+        defaultBookings.forEach(b => {
+          const { id, ...data } = b;
+          batch.set(doc(db, "bookings", id), data);
+        });
+        batch.commit();
+        bookingsLoaded = true;
+        checkLoaded();
+        return;
+      }
+      setBookings(snap.docs.map(d => ({ ...d.data(), id: d.id })) as Booking[]);
+      bookingsLoaded = true;
+      checkLoaded();
+    }));
+
+    // staffRoles
+    unsubs.push(onSnapshot(collection(db, "staffRoles"), (snap) => {
+      if (snap.empty && !rolesLoaded) {
+        const batch = writeBatch(db);
+        DEFAULT_STAFF_ROLES.forEach(r => {
+          const { id, ...data } = r;
+          batch.set(doc(db, "staffRoles", id), data);
+        });
+        batch.commit();
+        rolesLoaded = true;
+        checkLoaded();
+        return;
+      }
+      setStaffRoles(snap.docs.map(d => ({ ...d.data(), id: d.id })) as StaffRole[]);
+      rolesLoaded = true;
+      checkLoaded();
+    }));
+
+    function checkLoaded() {
+      if (profilesLoaded && slotsLoaded && bookingsLoaded && rolesLoaded) setLoaded(true);
+    }
+
+    return () => unsubs.forEach(u => u());
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // =============================================
   // ロール管理
   // =============================================
 
   const addStaffRole = useCallback((name: string) => {
-    setStaffRoles(prev => {
-      const newRole: StaffRole = {
-        id: crypto.randomUUID(),
-        name,
-        order: prev.length + 1,
-      };
-      const newRoles = [...prev, newRole];
-      saveToStorage(STORAGE_KEY_ROLES, newRoles);
-      return newRoles;
-    });
-  }, []);
+    const id = crypto.randomUUID();
+    const newRole: StaffRole = { id, name, order: staffRoles.length + 1 };
+    setStaffRoles(prev => [...prev, newRole]);
+    const { id: roleId, ...data } = newRole;
+    setDoc(doc(db, "staffRoles", roleId), data);
+  }, [staffRoles.length]);
 
   const updateStaffRole = useCallback((id: string, updates: Partial<StaffRole>) => {
-    setStaffRoles(prev => {
-      const newRoles = prev.map(r => r.id === id ? { ...r, ...updates } : r);
-      saveToStorage(STORAGE_KEY_ROLES, newRoles);
-      return newRoles;
-    });
+    setStaffRoles(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+    setDoc(doc(db, "staffRoles", id), updates, { merge: true });
   }, []);
 
   const deleteStaffRole = useCallback((id: string) => {
-    setStaffRoles(prev => {
-      const newRoles = prev.filter(r => r.id !== id);
-      saveToStorage(STORAGE_KEY_ROLES, newRoles);
-      return newRoles;
-    });
+    setStaffRoles(prev => prev.filter(r => r.id !== id));
+    deleteDoc(doc(db, "staffRoles", id));
     // スタッフプロフィールから削除されたロールIDを除去
     setStaffProfiles(prev => {
       const newProfiles = prev.map(p => ({
         ...p,
         roleIds: p.roleIds.filter(rid => rid !== id),
       }));
-      saveToStorage(STORAGE_KEY_STAFF, newProfiles);
+      newProfiles.forEach(p => {
+        const { id: pId, ...data } = p;
+        setDoc(doc(db, "staffProfiles", pId), data);
+      });
       return newProfiles;
     });
   }, []);
@@ -244,27 +293,21 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
   // =============================================
 
   const addStaffProfile = useCallback((profile: Omit<StaffProfile, "id">) => {
-    setStaffProfiles(prev => {
-      const newProfiles = [...prev, { ...profile, id: crypto.randomUUID() }];
-      saveToStorage(STORAGE_KEY_STAFF, newProfiles);
-      return newProfiles;
-    });
+    const id = crypto.randomUUID();
+    const data = { ...profile, id };
+    setStaffProfiles(prev => [...prev, data as StaffProfile]);
+    const { id: _id, ...rest } = data;
+    setDoc(doc(db, "staffProfiles", id), rest);
   }, []);
 
   const updateStaffProfile = useCallback((id: string, updates: Partial<StaffProfile>) => {
-    setStaffProfiles(prev => {
-      const newProfiles = prev.map(p => p.id === id ? { ...p, ...updates } : p);
-      saveToStorage(STORAGE_KEY_STAFF, newProfiles);
-      return newProfiles;
-    });
+    setStaffProfiles(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    setDoc(doc(db, "staffProfiles", id), updates, { merge: true });
   }, []);
 
   const deleteStaffProfile = useCallback((id: string) => {
-    setStaffProfiles(prev => {
-      const newProfiles = prev.filter(p => p.id !== id);
-      saveToStorage(STORAGE_KEY_STAFF, newProfiles);
-      return newProfiles;
-    });
+    setStaffProfiles(prev => prev.filter(p => p.id !== id));
+    deleteDoc(doc(db, "staffProfiles", id));
   }, []);
 
   // =============================================
@@ -272,30 +315,27 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
   // =============================================
 
   const addTimeSlot = useCallback((slot: Omit<TimeSlot, "id">) => {
-    setTimeSlots(prev => {
-      const newSlots = [...prev, { ...slot, id: crypto.randomUUID() }];
-      saveToStorage(STORAGE_KEY_SLOTS, newSlots);
-      return newSlots;
-    });
+    const id = crypto.randomUUID();
+    const newSlot = { ...slot, id };
+    setTimeSlots(prev => [...prev, newSlot]);
+    const { id: _id, ...data } = newSlot;
+    setDoc(doc(db, "timeSlots", id), data);
   }, []);
 
   const addTimeSlots = useCallback((slots: Omit<TimeSlot, "id">[]) => {
-    setTimeSlots(prev => {
-      const newSlots = [
-        ...prev,
-        ...slots.map(slot => ({ ...slot, id: crypto.randomUUID() })),
-      ];
-      saveToStorage(STORAGE_KEY_SLOTS, newSlots);
-      return newSlots;
+    const newSlots = slots.map(slot => ({ ...slot, id: crypto.randomUUID() }));
+    setTimeSlots(prev => [...prev, ...newSlots]);
+    const batch = writeBatch(db);
+    newSlots.forEach(s => {
+      const { id, ...data } = s;
+      batch.set(doc(db, "timeSlots", id), data);
     });
+    batch.commit();
   }, []);
 
   const deleteTimeSlot = useCallback((id: string) => {
-    setTimeSlots(prev => {
-      const newSlots = prev.filter(s => s.id !== id);
-      saveToStorage(STORAGE_KEY_SLOTS, newSlots);
-      return newSlots;
-    });
+    setTimeSlots(prev => prev.filter(s => s.id !== id));
+    deleteDoc(doc(db, "timeSlots", id));
   }, []);
 
   const getSlotsByStaff = useCallback((staffId: string) => {
@@ -325,11 +365,9 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
     };
 
-    setBookings(prev => {
-      const newBookings = [...prev, newBooking];
-      saveToStorage(STORAGE_KEY_BOOKINGS, newBookings);
-      return newBookings;
-    });
+    setBookings(prev => [...prev, newBooking]);
+    const { id, ...data } = newBooking;
+    setDoc(doc(db, "bookings", id), data);
 
     return newBooking;
   }, []);
@@ -351,9 +389,15 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
             }
           : b
       );
-      saveToStorage(STORAGE_KEY_BOOKINGS, newBookings);
       return newBookings;
     });
+    setDoc(doc(db, "bookings", bookingId), {
+      confirmedSlotId,
+      assignedStaffId,
+      meetLink,
+      status: "confirmed" as BookingStatus,
+      updatedAt: now,
+    }, { merge: true });
 
     // 対象スロットを予約済みに
     setTimeSlots(prev => {
@@ -362,15 +406,17 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
           ? { ...s, isBooked: true, bookingId }
           : s
       );
-      saveToStorage(STORAGE_KEY_SLOTS, newSlots);
       return newSlots;
     });
+    setDoc(doc(db, "timeSlots", confirmedSlotId), {
+      isBooked: true,
+      bookingId,
+    }, { merge: true });
   }, []);
 
   const cancelBooking = useCallback((bookingId: string) => {
     const now = new Date().toISOString();
 
-    // 予約をキャンセル
     setBookings(prev => {
       const booking = prev.find(b => b.id === bookingId);
       const newBookings = prev.map(b =>
@@ -378,7 +424,6 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
           ? { ...b, status: "cancelled" as BookingStatus, updatedAt: now }
           : b
       );
-      saveToStorage(STORAGE_KEY_BOOKINGS, newBookings);
 
       // 確定済みスロットがあれば解放
       if (booking?.confirmedSlotId) {
@@ -388,13 +433,20 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
               ? { ...s, isBooked: false, bookingId: undefined }
               : s
           );
-          saveToStorage(STORAGE_KEY_SLOTS, newSlots);
           return newSlots;
         });
+        setDoc(doc(db, "timeSlots", booking.confirmedSlotId), {
+          isBooked: false,
+          bookingId: null,
+        }, { merge: true });
       }
 
       return newBookings;
     });
+    setDoc(doc(db, "bookings", bookingId), {
+      status: "cancelled" as BookingStatus,
+      updatedAt: now,
+    }, { merge: true });
   }, []);
 
   const getBookingByNumber = useCallback((bookingNumber: string, studentEmail: string): Booking | undefined => {
@@ -412,9 +464,12 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
           ? { ...b, selectedSlotIds: newSlotIds, updatedAt: now }
           : b
       );
-      saveToStorage(STORAGE_KEY_BOOKINGS, newBookings);
       return newBookings;
     });
+    setDoc(doc(db, "bookings", bookingId), {
+      selectedSlotIds: newSlotIds,
+      updatedAt: now,
+    }, { merge: true });
   }, []);
 
   return (

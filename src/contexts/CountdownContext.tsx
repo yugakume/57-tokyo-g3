@@ -1,6 +1,8 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
+import { db } from "@/lib/firebase";
+import { collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch } from "firebase/firestore";
 
 // =============================================
 // CountdownContext
@@ -20,27 +22,6 @@ interface CountdownContextType {
 }
 
 const CountdownContext = createContext<CountdownContextType | undefined>(undefined);
-
-// =============================================
-// localStorage helpers
-// =============================================
-
-const STORAGE_KEY = "portal_countdowns";
-
-function loadFromStorage(): CountdownItem[] | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveToStorage(data: CountdownItem[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-}
 
 // =============================================
 // デフォルトデータ
@@ -63,33 +44,39 @@ export function CountdownProvider({ children }: { children: ReactNode }) {
   const [countdowns, setCountdowns] = useState<CountdownItem[]>([]);
   const [loaded, setLoaded] = useState(false);
 
+  // Firestoreリアルタイムリスナー
   useEffect(() => {
-    const stored = loadFromStorage();
-    if (stored && stored.length > 0) {
-      setCountdowns(stored);
-    } else {
-      setCountdowns(DEFAULT_COUNTDOWNS);
-      saveToStorage(DEFAULT_COUNTDOWNS);
-    }
-    setLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (loaded) {
-      saveToStorage(countdowns);
-    }
-  }, [countdowns, loaded]);
+    const unsub = onSnapshot(collection(db, "countdowns"), (snapshot) => {
+      if (snapshot.empty && !loaded) {
+        // 初回かつデータなし → デフォルトデータを投入
+        const batch = writeBatch(db);
+        DEFAULT_COUNTDOWNS.forEach((c) => {
+          const { id, ...data } = c;
+          batch.set(doc(db, "countdowns", id), data);
+        });
+        batch.commit();
+        return; // バッチ書き込み後にonSnapshotが再発火する
+      }
+      const data = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }) as CountdownItem);
+      setCountdowns(data);
+      setLoaded(true);
+    });
+    return () => unsub();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addCountdown = useCallback((item: Omit<CountdownItem, "id">) => {
     const newItem: CountdownItem = {
       ...item,
       id: `countdown-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     };
-    setCountdowns(prev => [...prev, newItem]);
+    setCountdowns((prev) => [...prev, newItem]);
+    const { id, ...data } = newItem;
+    setDoc(doc(db, "countdowns", id), data);
   }, []);
 
   const deleteCountdown = useCallback((id: string) => {
-    setCountdowns(prev => prev.filter(c => c.id !== id));
+    setCountdowns((prev) => prev.filter((c) => c.id !== id));
+    deleteDoc(doc(db, "countdowns", id));
   }, []);
 
   return (
