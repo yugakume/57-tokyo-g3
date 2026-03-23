@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
   output: "export",
   basePath: isProd ? "/57-tokyo-g3" : "",
   assetPrefix: isProd ? "/57-tokyo-g3/" : "",
+  trailingSlash: true,
   images: {
     unoptimized: true,
   },
