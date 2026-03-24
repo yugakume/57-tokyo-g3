@@ -50,7 +50,7 @@ function getNextSaturday(): string {
 // メインページ
 // =============================================
 
-export default function MinutesPage() {
+export default function MeetingPage() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
   const { minutes, addMinutes, updateMinutes, deleteMinutes, updateAttendance } = useMeetingMinutes();
@@ -83,7 +83,7 @@ export default function MinutesPage() {
     return Array.from(months).sort().reverse();
   }, [minutes]);
 
-  // フィルタ済み議事録
+  // フィルタ済みMTG
   const filteredMinutes = useMemo(() => {
     let list = [...minutes];
     if (filterMonth !== "all") {
@@ -119,18 +119,18 @@ export default function MinutesPage() {
   const handleAdd = (data: Omit<MeetingMinutes, "id" | "createdAt" | "updatedAt">) => {
     addMinutes(data);
     setShowAddModal(false);
-    showToast("議事録を追加しました");
+    showToast("MTGを追加しました");
   };
 
   const handleUpdate = (data: Omit<MeetingMinutes, "id" | "createdAt" | "updatedAt">) => {
     if (!editingMinutes) return;
     updateMinutes(editingMinutes.id, data);
     setEditingMinutes(null);
-    showToast("議事録を更新しました");
+    showToast("MTGを更新しました");
   };
 
   const handleDelete = (id: string) => {
-    if (!confirm("この議事録を削除しますか？")) return;
+    if (!confirm("このMTGを削除しますか？")) return;
     deleteMinutes(id);
     if (expandedId === id) setExpandedId(null);
     showToast("削除しました");
@@ -148,13 +148,16 @@ export default function MinutesPage() {
     <div className="max-w-4xl mx-auto px-4 py-6 sm:py-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">MTG議事録</h1>
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">MTG</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">MTGの日程管理・出欠・議事録</p>
+        </div>
         <button
           onClick={() => setShowAddModal(true)}
           className="flex items-center gap-1.5 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
         >
           <PlusIcon className="w-4 h-4" />
-          議事録を追加
+          MTGを追加
         </button>
       </div>
 
@@ -189,8 +192,8 @@ export default function MinutesPage() {
       {/* List */}
       {groupedMinutes.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
-          <p className="text-lg mb-2">議事録がありません</p>
-          <p className="text-sm">「議事録を追加」から新しい議事録を作成してください</p>
+          <p className="text-lg mb-2">MTGがありません</p>
+          <p className="text-sm">「MTGを追加」から新しいMTGを作成してください</p>
         </div>
       ) : (
         <div className="space-y-8">
@@ -201,7 +204,7 @@ export default function MinutesPage() {
               </h2>
               <div className="space-y-3">
                 {items.map(m => (
-                  <MinutesCard
+                  <MeetingCard
                     key={m.id}
                     minutes={m}
                     myNearestStation={myProfile?.nearestStation}
@@ -222,7 +225,7 @@ export default function MinutesPage() {
 
       {/* Modals */}
       {showAddModal && (
-        <MinutesModal
+        <MeetingModal
           userEmail={user.email}
           staffProfiles={staffProfiles}
           onSave={handleAdd}
@@ -230,7 +233,7 @@ export default function MinutesPage() {
         />
       )}
       {editingMinutes && (
-        <MinutesModal
+        <MeetingModal
           userEmail={user.email}
           staffProfiles={staffProfiles}
           initial={editingMinutes}
@@ -250,7 +253,7 @@ export default function MinutesPage() {
 }
 
 // =============================================
-// 議事録カード
+// MTGカード
 // =============================================
 
 function buildGoogleCalendarUrl(m: MeetingMinutes): string {
@@ -267,7 +270,7 @@ function buildGoogleCalendarUrl(m: MeetingMinutes): string {
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
-function MinutesCard({
+function MeetingCard({
   minutes: m,
   myNearestStation,
   userEmail,
@@ -290,6 +293,7 @@ function MinutesCard({
 }) {
   const isPast = m.date < new Date().toISOString().split("T")[0];
   const myStatus = m.attendance?.[userEmail];
+  const [showMinutes, setShowMinutes] = useState(false);
   const attendanceCounts = useMemo(() => {
     const att = m.attendance || {};
     const values = Object.values(att);
@@ -334,13 +338,13 @@ function MinutesCard({
           <div className="flex items-center gap-3 mt-0.5 flex-wrap">
             <span className="text-xs text-gray-400">{m.startTime}〜{m.endTime}</span>
             {m.venue && (
-              <span className="text-xs text-gray-500">📍 {m.venue}</span>
+              <span className="text-xs text-gray-500">{m.venue}</span>
             )}
             {m.attendees.length > 0 && (
               <span className="text-xs text-gray-400">出席: {m.attendees.length}名</span>
             )}
             {m.content && (
-              <span className="text-xs text-green-600">記録あり</span>
+              <span className="text-xs text-green-600">議事録あり</span>
             )}
           </div>
         </div>
@@ -350,7 +354,7 @@ function MinutesCard({
       {isExpanded && (
         <div className="px-4 pb-4 border-t border-gray-100 dark:border-gray-700">
           <div className="mt-3 space-y-3">
-            {/* Venue & Directions & Google Calendar */}
+            {/* 1. 日時・場所・Googleカレンダーリンク */}
             {m.venue && (
               <div>
                 <p className="text-xs font-medium text-gray-500 mb-1">会場</p>
@@ -387,7 +391,7 @@ function MinutesCard({
               </a>
             </div>
 
-            {/* 出欠回答 */}
+            {/* 2. 出欠回答 */}
             <div>
               <p className="text-xs font-medium text-gray-500 mb-2">出欠回答</p>
               <div className="flex items-center gap-2 mb-2">
@@ -446,15 +450,31 @@ function MinutesCard({
               </div>
             )}
 
-            {/* Content */}
-            <div>
-              <p className="text-xs font-medium text-gray-500 mb-1">議事録</p>
-              {m.content ? (
-                <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap bg-gray-50 dark:bg-gray-900 rounded-lg p-3 max-h-96 overflow-y-auto">
-                  {m.content}
+            {/* 3. 区切り線 + 議事録（折りたたみ） */}
+            <div className="border-t border-gray-200 dark:border-gray-600 pt-3">
+              <button
+                onClick={() => setShowMinutes(!showMinutes)}
+                className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+              >
+                <ChevronIcon
+                  direction={showMinutes ? "down" : "right"}
+                  className="w-3.5 h-3.5"
+                />
+                <span>{showMinutes ? "議事録を閉じる" : "議事録を表示"}</span>
+                {m.content && !showMinutes && (
+                  <span className="text-xs text-green-600 ml-1">（記録あり）</span>
+                )}
+              </button>
+              {showMinutes && (
+                <div className="mt-2">
+                  {m.content ? (
+                    <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap bg-gray-50 dark:bg-gray-900 rounded-lg p-3 max-h-96 overflow-y-auto">
+                      {m.content}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400 italic">まだ記録がありません</p>
+                  )}
                 </div>
-              ) : (
-                <p className="text-sm text-gray-400 italic">まだ記録がありません</p>
               )}
             </div>
 
@@ -486,7 +506,7 @@ function MinutesCard({
 // 追加/編集モーダル
 // =============================================
 
-function MinutesModal({
+function MeetingModal({
   userEmail,
   staffProfiles,
   initial,
@@ -559,7 +579,7 @@ function MinutesModal({
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-            {initial ? "議事録を編集" : "議事録を追加"}
+            {initial ? "MTGを編集" : "新規MTG"}
           </h3>
           <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
             <CloseIcon className="w-5 h-5" />

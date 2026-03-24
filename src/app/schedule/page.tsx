@@ -1,25 +1,20 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
 import { EVENT_TYPE_LABELS } from "@/types";
 import type { EventType, TimeSlot, Booking, StaffProfile, StaffRole } from "@/types";
-import { PlusIcon, TrashIcon, EditIcon, CheckIcon, CalendarIcon, CloseIcon, CopyIcon, ExternalLinkIcon } from "@/components/Icons";
+import { TrashIcon, EditIcon, CheckIcon, CalendarIcon, CloseIcon, CopyIcon, ExternalLinkIcon, ChevronIcon } from "@/components/Icons";
 import Toast from "@/components/Toast";
+import { fetchCalendarEvents, type CalendarEvent } from "@/lib/googleCalendar";
 
 type Tab = "slots" | "bookings" | "profile";
 
 // =============================================
 // ユーティリティ
 // =============================================
-
-const TIME_OPTIONS: string[] = [];
-for (let h = 9; h <= 20; h++) {
-  TIME_OPTIONS.push(`${String(h).padStart(2, "0")}:00`);
-  if (h < 20) TIME_OPTIONS.push(`${String(h).padStart(2, "0")}:30`);
-}
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00");
@@ -34,17 +29,6 @@ function getWeekDates(baseDate: Date): string[] {
   for (let i = 0; i < 7; i++) {
     const d = new Date(start);
     d.setDate(start.getDate() + i);
-    dates.push(d.toISOString().split("T")[0]);
-  }
-  return dates;
-}
-
-function getNext14Days(): string[] {
-  const dates: string[] = [];
-  const today = new Date();
-  for (let i = 0; i < 14; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + i);
     dates.push(d.toISOString().split("T")[0]);
   }
   return dates;
@@ -73,7 +57,7 @@ const STATUS_COLORS: Record<string, string> = {
 // =============================================
 
 export default function SchedulePage() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, calendarAccessToken, requestCalendarAccess, isDemoMode } = useAuth();
   const {
     staffProfiles, timeSlots, bookings, staffRoles,
     addStaffProfile, updateStaffProfile,
@@ -140,6 +124,9 @@ export default function SchedulePage() {
           addTimeSlots={addTimeSlots}
           deleteTimeSlot={deleteTimeSlot}
           setToast={setToast}
+          calendarAccessToken={calendarAccessToken}
+          requestCalendarAccess={requestCalendarAccess}
+          isDemoMode={isDemoMode}
         />
       )}
 
@@ -172,8 +159,26 @@ export default function SchedulePage() {
 }
 
 // =============================================
-// Tab 1: 空き日程
+// Tab 1: 空き日程（週間カレンダービュー）
 // =============================================
+
+// 30分刻みの時間スロット（9:00〜21:00 = 24行）
+const CALENDAR_TIMES: string[] = [];
+for (let h = 9; h <= 20; h++) {
+  CALENDAR_TIMES.push(`${String(h).padStart(2, "0")}:00`);
+  CALENDAR_TIMES.push(`${String(h).padStart(2, "0")}:30`);
+}
+
+function timeToIndex(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return (h - 9) * 2 + (m >= 30 ? 1 : 0);
+}
+
+function indexToTime(index: number): string {
+  const h = 9 + Math.floor(index / 2);
+  const m = index % 2 === 0 ? "00" : "30";
+  return `${String(h).padStart(2, "0")}:${m}`;
+}
 
 function SlotsTab({
   myProfile,
@@ -183,6 +188,9 @@ function SlotsTab({
   addTimeSlots,
   deleteTimeSlot,
   setToast,
+  calendarAccessToken,
+  requestCalendarAccess,
+  isDemoMode,
 }: {
   myProfile: StaffProfile | undefined;
   timeSlots: TimeSlot[];
@@ -191,21 +199,276 @@ function SlotsTab({
   addTimeSlots: (slots: Omit<TimeSlot, "id">[]) => void;
   deleteTimeSlot: (id: string) => void;
   setToast: (msg: string) => void;
+  calendarAccessToken: string | null;
+  requestCalendarAccess: () => void;
+  isDemoMode: boolean;
 }) {
-  const [showModal, setShowModal] = useState(false);
+  type ViewMode = "day" | "week" | "2week" | "month";
+  const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [weekOffset, setWeekOffset] = useState(0);
+  const [eventType, setEventType] = useState<EventType>("orientation");
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [calendarLoading, setCalendarLoading] = useState(false);
 
-  const weekDates = useMemo(() => {
+  // Drag state
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState<{ day: string; timeIdx: number } | null>(null);
+  const [dragEnd, setDragEnd] = useState<{ day: string; timeIdx: number } | null>(null);
+
+  // Confirm dialog
+  const [confirmDialog, setConfirmDialog] = useState<{
+    date: string;
+    startTime: string;
+    endTime: string;
+  } | null>(null);
+
+  // Slot detail popover
+  const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
+
+  // Mobile: date picker mode
+  const [mobileSelectedDate, setMobileSelectedDate] = useState<string | null>(null);
+
+  const viewDates = useMemo(() => {
     const base = new Date();
+    if (viewMode === "day") {
+      base.setDate(base.getDate() + weekOffset);
+      return [base.toISOString().split("T")[0]];
+    } else if (viewMode === "2week") {
+      base.setDate(base.getDate() + weekOffset * 14);
+      const w1 = getWeekDates(base);
+      const w2base = new Date(base);
+      w2base.setDate(w2base.getDate() + 7);
+      return [...w1, ...getWeekDates(w2base)];
+    } else if (viewMode === "month") {
+      const m = new Date(base.getFullYear(), base.getMonth() + weekOffset, 1);
+      const start = new Date(m);
+      start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // Monday
+      const dates: string[] = [];
+      for (let i = 0; i < 42; i++) {
+        const d = new Date(start);
+        d.setDate(start.getDate() + i);
+        dates.push(d.toISOString().split("T")[0]);
+      }
+      return dates;
+    }
     base.setDate(base.getDate() + weekOffset * 7);
     return getWeekDates(base);
-  }, [weekOffset]);
+  }, [weekOffset, viewMode]);
 
-  // Filter slots for this staff member
+  // For backward compat with existing code that references weekDates
+  const weekDates = viewMode === "week" || viewMode === "day" || viewMode === "2week" ? viewDates : viewDates.slice(0, 7);
+
+  // Googleカレンダーのイベントを取得
+  useEffect(() => {
+    if (!calendarAccessToken || weekDates.length === 0) {
+      setCalendarEvents([]);
+      return;
+    }
+    let cancelled = false;
+    setCalendarLoading(true);
+    const timeMin = new Date(weekDates[0] + "T00:00:00").toISOString();
+    const timeMax = new Date(weekDates[6] + "T23:59:59").toISOString();
+    fetchCalendarEvents(calendarAccessToken, timeMin, timeMax)
+      .then(events => {
+        if (!cancelled) setCalendarEvents(events);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCalendarEvents([]);
+          setToast("Googleカレンダーの取得に失敗しました。再度連携してください。");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCalendarLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [calendarAccessToken, weekDates, setToast]);
+
+  // カレンダーイベントを日付+時間インデックスでマッピング
+  const gcalBlocksByDate = useMemo(() => {
+    const map = new Map<string, { ev: CalendarEvent; startIdx: number; spanCount: number }[]>();
+    calendarEvents.forEach(ev => {
+      const dateStr = ev.start.length > 10 ? ev.start.substring(0, 10) : ev.start;
+      if (!weekDates.includes(dateStr)) return;
+      const existing = map.get(dateStr) || [];
+      if (ev.allDay) {
+        existing.push({ ev, startIdx: 0, spanCount: CALENDAR_TIMES.length });
+      } else {
+        const startH = parseInt(ev.start.substring(11, 13));
+        const startM = parseInt(ev.start.substring(14, 16));
+        const endH = parseInt(ev.end.substring(11, 13));
+        const endM = parseInt(ev.end.substring(14, 16));
+        const sIdx = Math.max(0, (startH - 9) * 2 + (startM >= 30 ? 1 : 0));
+        const eIdx = Math.min(CALENDAR_TIMES.length, (endH - 9) * 2 + (endM > 0 ? (endM >= 30 ? 2 : 1) : 0));
+        if (eIdx > sIdx) {
+          existing.push({ ev, startIdx: sIdx, spanCount: eIdx - sIdx });
+        }
+      }
+      map.set(dateStr, existing);
+    });
+    return map;
+  }, [calendarEvents, weekDates]);
+
   const mySlots = useMemo(() => {
     if (!myProfile) return [];
     return timeSlots.filter(s => s.staffId === myProfile.id);
   }, [timeSlots, myProfile]);
+
+  // Map of date -> timeIndex -> slot for quick lookup
+  const slotMap = useMemo(() => {
+    const map = new Map<string, Map<number, TimeSlot>>();
+    mySlots.forEach(slot => {
+      if (!map.has(slot.date)) map.set(slot.date, new Map());
+      const dateMap = map.get(slot.date)!;
+      const startIdx = timeToIndex(slot.startTime);
+      const endIdx = timeToIndex(slot.endTime);
+      for (let i = startIdx; i < endIdx; i++) {
+        dateMap.set(i, slot);
+      }
+    });
+    return map;
+  }, [mySlots]);
+
+  // Slot blocks for rendering
+  const slotBlocks = useMemo(() => {
+    const blocks: { slot: TimeSlot; startIdx: number; spanCount: number }[] = [];
+    const seen = new Set<string>();
+    mySlots.forEach(slot => {
+      if (seen.has(slot.id)) return;
+      seen.add(slot.id);
+      if (!weekDates.includes(slot.date)) return;
+      const startIdx = timeToIndex(slot.startTime);
+      const endIdx = timeToIndex(slot.endTime);
+      blocks.push({ slot, startIdx, spanCount: endIdx - startIdx });
+    });
+    return blocks;
+  }, [mySlots, weekDates]);
+
+  const getBookingForSlot = useCallback((slot: TimeSlot): Booking | undefined => {
+    if (!slot.bookingId) return undefined;
+    return bookings.find(b => b.id === slot.bookingId);
+  }, [bookings]);
+
+  // Drag preview calculation
+  const dragPreview = useMemo(() => {
+    if (!isDragging || !dragStart || !dragEnd) return null;
+    if (dragStart.day !== dragEnd.day) return null;
+    const minIdx = Math.min(dragStart.timeIdx, dragEnd.timeIdx);
+    const maxIdx = Math.max(dragStart.timeIdx, dragEnd.timeIdx);
+    return {
+      day: dragStart.day,
+      startIdx: minIdx,
+      endIdx: maxIdx + 1,
+    };
+  }, [isDragging, dragStart, dragEnd]);
+
+  const handleMouseDown = useCallback((day: string, timeIdx: number) => {
+    const dateMap = slotMap.get(day);
+    if (dateMap?.has(timeIdx)) return;
+    setIsDragging(true);
+    setDragStart({ day, timeIdx });
+    setDragEnd({ day, timeIdx });
+  }, [slotMap]);
+
+  const handleMouseEnter = useCallback((day: string, timeIdx: number) => {
+    if (!isDragging || !dragStart) return;
+    if (day !== dragStart.day) return;
+    setDragEnd({ day, timeIdx });
+  }, [isDragging, dragStart]);
+
+  const handleMouseUp = useCallback(() => {
+    if (!isDragging || !dragStart || !dragEnd) {
+      setIsDragging(false);
+      setDragStart(null);
+      setDragEnd(null);
+      return;
+    }
+    if (dragStart.day !== dragEnd.day) {
+      setIsDragging(false);
+      setDragStart(null);
+      setDragEnd(null);
+      return;
+    }
+
+    const minIdx = Math.min(dragStart.timeIdx, dragEnd.timeIdx);
+    const maxIdx = Math.max(dragStart.timeIdx, dragEnd.timeIdx) + 1;
+    const effectiveEndIdx = (maxIdx - minIdx < 2) ? Math.min(minIdx + 2, CALENDAR_TIMES.length) : maxIdx;
+
+    const startTimeStr = indexToTime(minIdx);
+    const endTimeStr = indexToTime(effectiveEndIdx);
+
+    setConfirmDialog({ date: dragStart.day, startTime: startTimeStr, endTime: endTimeStr });
+    setIsDragging(false);
+    setDragStart(null);
+    setDragEnd(null);
+  }, [isDragging, dragStart, dragEnd]);
+
+  // Global mouseup
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      if (isDragging) {
+        handleMouseUp();
+      }
+    };
+    window.addEventListener("mouseup", handleGlobalMouseUp);
+    return () => window.removeEventListener("mouseup", handleGlobalMouseUp);
+  }, [isDragging, handleMouseUp]);
+
+  // Prevent text selection during drag
+  useEffect(() => {
+    if (isDragging) {
+      document.body.style.userSelect = "none";
+    } else {
+      document.body.style.userSelect = "";
+    }
+    return () => { document.body.style.userSelect = ""; };
+  }, [isDragging]);
+
+  const handleConfirmAdd = () => {
+    if (!confirmDialog || !myProfile) return;
+    addTimeSlot({
+      staffId: myProfile.id,
+      date: confirmDialog.date,
+      startTime: confirmDialog.startTime,
+      endTime: confirmDialog.endTime,
+      eventType,
+      isBooked: false,
+    });
+    setToast("空き枠を追加しました");
+    setConfirmDialog(null);
+  };
+
+  const handleDeleteSlot = (slotId: string) => {
+    const slot = timeSlots.find(s => s.id === slotId);
+    if (slot?.isBooked) return;
+    deleteTimeSlot(slotId);
+    setSelectedSlot(null);
+    setToast("枠を削除しました");
+  };
+
+  // Swipe navigation
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStartX(e.touches[0].clientX);
+  };
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX === null) return;
+    const diff = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(diff) > 60) {
+      setWeekOffset(w => diff > 0 ? w - 1 : w + 1);
+    }
+    setTouchStartX(null);
+  };
+
+  const handleMobileTimeClick = (date: string, time: string) => {
+    const [h, m] = time.split(":").map(Number);
+    const endMin = h * 60 + m + 60;
+    if (endMin > 21 * 60) return;
+    const endH = Math.floor(endMin / 60);
+    const endM = endMin % 60;
+    const endTimeStr = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
+    setConfirmDialog({ date, startTime: time, endTime: endTimeStr });
+  };
 
   if (!myProfile) {
     return (
@@ -217,160 +480,415 @@ function SlotsTab({
     );
   }
 
-  // Group slots by date
-  const slotsByDate = new Map<string, TimeSlot[]>();
-  mySlots.forEach(slot => {
-    const existing = slotsByDate.get(slot.date) || [];
-    existing.push(slot);
-    slotsByDate.set(slot.date, existing);
-  });
-
-  // Sort slots within each date
-  slotsByDate.forEach((slots) => {
-    slots.sort((a, b) => a.startTime.localeCompare(b.startTime));
-  });
-
-  const handleDelete = (slotId: string) => {
-    const slot = timeSlots.find(s => s.id === slotId);
-    if (slot?.isBooked) return;
-    deleteTimeSlot(slotId);
-    setToast("枠を削除しました");
-  };
-
-  // Find the booking for a booked slot
-  const getBookingForSlot = (slot: TimeSlot): Booking | undefined => {
-    if (!slot.bookingId) return undefined;
-    return bookings.find(b => b.id === slot.bookingId);
-  };
+  const todayStr = new Date().toISOString().split("T")[0];
 
   return (
     <div>
-      {/* Week navigation */}
-      <div className="flex items-center justify-between mb-4">
-        <button
-          onClick={() => setWeekOffset(w => w - 1)}
-          className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-        >
-          &larr; 前週
-        </button>
-        <div className="text-sm font-medium text-gray-700">
-          {formatDate(weekDates[0])} 〜 {formatDate(weekDates[6])}
+      {/* View mode toggle */}
+      <div className="flex items-center gap-1 mb-3 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit">
+        {([["day", "日"], ["week", "週"], ["2week", "2週"], ["month", "月"]] as [ViewMode, string][]).map(([mode, label]) => (
+          <button
+            key={mode}
+            onClick={() => { setViewMode(mode); setWeekOffset(0); }}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+              viewMode === mode
+                ? "bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Navigation + controls */}
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setWeekOffset(w => w - 1)}
+            className="p-2 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            <ChevronIcon direction="left" className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+          </button>
+          <button
+            onClick={() => setWeekOffset(0)}
+            className="px-3 py-1.5 text-sm border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300 font-medium"
+          >
+            {viewMode === "day" ? "今日" : viewMode === "month" ? "今月" : "今週"}
+          </button>
+          <button
+            onClick={() => setWeekOffset(w => w + 1)}
+            className="p-2 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            <ChevronIcon direction="right" className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+          </button>
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-2">
+            {viewMode === "day" ? formatDate(viewDates[0])
+              : viewMode === "month" ? `${new Date(viewDates[10]).getFullYear()}年${new Date(viewDates[10]).getMonth() + 1}月`
+              : `${formatDate(viewDates[0])} 〜 ${formatDate(viewDates[viewDates.length - 1])}`}
+          </span>
         </div>
-        <button
-          onClick={() => setWeekOffset(w => w + 1)}
-          className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-        >
-          次週 &rarr;
-        </button>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <label className="text-xs text-gray-500 dark:text-gray-400">種別:</label>
+            <select
+              value={eventType}
+              onChange={e => setEventType(e.target.value as EventType)}
+              className="text-xs px-2 py-1 border border-gray-200 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              {(Object.entries(EVENT_TYPE_LABELS) as [EventType, string][]).map(([key, label]) => (
+                <option key={key} value={key}>{label}</option>
+              ))}
+            </select>
+          </div>
+          {/* Google Calendar connect */}
+          {!isDemoMode && !calendarAccessToken && (
+            <button
+              onClick={requestCalendarAccess}
+              className="flex items-center gap-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-xs px-2.5 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              <CalendarIcon className="w-3.5 h-3.5" /> Googleカレンダー連携
+            </button>
+          )}
+          {calendarAccessToken && (
+            <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+              <CalendarIcon className="w-3.5 h-3.5" />
+              連携中
+              {calendarLoading && <span className="w-3 h-3 border border-green-400 border-t-transparent rounded-full animate-spin inline-block" />}
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Add slot button */}
-      <div className="mb-4">
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex items-center gap-1.5 bg-blue-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <PlusIcon className="w-4 h-4" /> 空き枠を追加
-        </button>
+      {/* Legend */}
+      <div className="flex items-center gap-4 mb-3 text-xs text-gray-500 dark:text-gray-400">
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-3 rounded bg-blue-200 border border-blue-300" />
+          <span>空き枠</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-3 rounded bg-green-200 border border-green-300" />
+          <span>予約済み</span>
+        </div>
+        {calendarAccessToken && (
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-3 rounded bg-pink-200 border border-pink-300" />
+            <span>Googleカレンダー</span>
+          </div>
+        )}
+        <div className="hidden md:flex items-center gap-1.5 ml-auto text-gray-400 dark:text-gray-500">
+          <span>ドラッグまたはクリックで枠を追加</span>
+        </div>
       </div>
 
-      {/* Weekly calendar view */}
-      {/* Desktop: columns, Mobile: rows */}
-      <div className="hidden md:grid grid-cols-7 gap-2">
-        {weekDates.map(date => {
-          const slots = slotsByDate.get(date) || [];
-          const isToday = date === new Date().toISOString().split("T")[0];
-          return (
-            <div key={date} className={`bg-white dark:bg-gray-800 rounded-xl border ${isToday ? "border-blue-300 dark:border-blue-600 ring-1 ring-blue-100 dark:ring-blue-800" : "border-gray-200 dark:border-gray-700"} p-3 min-h-[160px]`}>
-              <div className={`text-xs font-medium mb-2 ${isToday ? "text-blue-600" : "text-gray-500"}`}>
-                {formatDate(date)}
+      {/* ===== Month view ===== */}
+      {viewMode === "month" && (
+        <div className="hidden md:block bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="grid grid-cols-7 border-b border-gray-200 dark:border-gray-700">
+            {["月","火","水","木","金","土","日"].map(d => (
+              <div key={d} className={`p-2 text-xs font-medium text-center bg-gray-50 dark:bg-gray-900/50 ${d === "日" ? "text-red-500" : d === "土" ? "text-blue-500" : "text-gray-500 dark:text-gray-400"}`}>{d}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7">
+            {viewDates.map(date => {
+              const d = new Date(date + "T00:00:00");
+              const isToday = date === todayStr;
+              const baseMonth = new Date(viewDates[10] + "T00:00:00").getMonth();
+              const isCurrentMonth = d.getMonth() === baseMonth;
+              const daySlots = mySlots.filter(s => s.date === date);
+              return (
+                <div
+                  key={date}
+                  onClick={() => { setViewMode("day"); setWeekOffset(Math.round((new Date(date + "T00:00:00").getTime() - new Date().setHours(0,0,0,0)) / 86400000)); }}
+                  className={`min-h-[80px] p-1.5 border-b border-r border-gray-100 dark:border-gray-700 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors ${!isCurrentMonth ? "bg-gray-50 dark:bg-gray-900/30 opacity-50" : ""}`}
+                >
+                  <div className={`text-xs font-medium mb-1 ${isToday ? "bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center" : "text-gray-700 dark:text-gray-300"}`}>
+                    {d.getDate()}
+                  </div>
+                  {daySlots.length > 0 && (
+                    <div className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">{daySlots.length}件</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ===== Desktop: Time Grid (day/week/2week) ===== */}
+      {viewMode !== "month" && (
+      <div className="hidden md:block bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+        {/* Header row */}
+        <div className={`grid border-b border-gray-200 dark:border-gray-700`} style={{ gridTemplateColumns: `60px repeat(${viewDates.length}, 1fr)` }}>
+          <div className="p-2 text-xs text-gray-400 dark:text-gray-500 text-center bg-gray-50 dark:bg-gray-900/50">時間</div>
+          {viewDates.map(date => {
+            const isToday = date === todayStr;
+            const d = new Date(date + "T00:00:00");
+            const dayNames = ["日", "月", "火", "水", "木", "金", "土"];
+            const dayOfWeek = dayNames[d.getDay()];
+            const isSun = d.getDay() === 0;
+            const isSat = d.getDay() === 6;
+            return (
+              <div key={date} className={`p-2 text-center border-l border-gray-200 dark:border-gray-700 ${isToday ? "bg-blue-50 dark:bg-blue-900/20" : "bg-gray-50 dark:bg-gray-900/50"}`}>
+                <div className={`text-xs ${isSun ? "text-red-500" : isSat ? "text-blue-500" : "text-gray-500 dark:text-gray-400"}`}>
+                  {dayOfWeek}
+                </div>
+                <div className={`text-sm font-semibold ${isToday ? "text-blue-600 dark:text-blue-400" : "text-gray-800 dark:text-gray-200"}`}>
+                  {d.getDate()}
+                </div>
               </div>
-              {slots.length === 0 && (
-                <p className="text-xs text-gray-300 mt-4 text-center">枠なし</p>
-              )}
-              <div className="space-y-1.5">
-                {slots.map(slot => {
+            );
+          })}
+        </div>
+
+        {/* Time grid */}
+        <div className="relative grid overflow-y-auto" style={{ gridTemplateColumns: `60px repeat(${viewDates.length}, 1fr)`, height: `${CALENDAR_TIMES.length * 28}px` }}>
+          {/* Time labels */}
+          {CALENDAR_TIMES.map((time, idx) => (
+            <div
+              key={time}
+              className="absolute left-0 w-[60px] text-right pr-2 text-[10px] text-gray-400 dark:text-gray-500 border-r border-gray-200 dark:border-gray-700"
+              style={{ top: `${idx * 28}px`, height: "28px", lineHeight: "28px" }}
+            >
+              {time.endsWith(":00") ? time : ""}
+            </div>
+          ))}
+
+          {/* Grid cells per day */}
+          {viewDates.map((date, dayIdx) => (
+            <div key={date} className="absolute" style={{ left: `calc(60px + ${dayIdx} * ((100% - 60px) / ${viewDates.length}))`, width: `calc((100% - 60px) / ${viewDates.length})`, top: 0, height: "100%" }}>
+              {CALENDAR_TIMES.map((time, timeIdx) => {
+                const isHourLine = time.endsWith(":00");
+                const isInPreview = dragPreview &&
+                  dragPreview.day === date &&
+                  timeIdx >= dragPreview.startIdx &&
+                  timeIdx < dragPreview.endIdx;
+                const hasSlot = slotMap.get(date)?.has(timeIdx);
+
+                return (
+                  <div
+                    key={`${date}-${time}`}
+                    className={`absolute border-l ${isHourLine ? "border-t border-gray-200 dark:border-gray-700" : "border-t border-gray-100 dark:border-gray-800"} border-gray-200 dark:border-gray-700 ${
+                      !hasSlot && !isInPreview ? "hover:bg-blue-50/50 dark:hover:bg-blue-900/20 cursor-pointer" : ""
+                    } ${isInPreview ? "bg-blue-100/70 dark:bg-blue-800/40" : ""}`}
+                    style={{ top: `${timeIdx * 28}px`, height: "28px", left: 0, right: 0 }}
+                    onMouseDown={(e) => { e.preventDefault(); handleMouseDown(date, timeIdx); }}
+                    onMouseEnter={() => handleMouseEnter(date, timeIdx)}
+                    onMouseUp={() => handleMouseUp()}
+                  />
+                );
+              })}
+
+              {/* Slot blocks overlay */}
+              {slotBlocks
+                .filter(b => b.slot.date === date)
+                .map(({ slot, startIdx, spanCount }) => {
                   const booking = getBookingForSlot(slot);
                   const isConfirmed = booking?.status === "confirmed";
+                  const isBooked = slot.isBooked;
                   return (
                     <div
                       key={slot.id}
-                      className={`rounded-lg px-2 py-1.5 text-xs relative group ${
+                      className={`absolute left-0.5 right-0.5 rounded-md px-1.5 py-0.5 text-[10px] cursor-pointer overflow-hidden transition-shadow hover:shadow-md z-10 ${
                         isConfirmed
-                          ? "bg-green-50 border border-green-200 text-green-700"
-                          : slot.isBooked
-                          ? "bg-gray-100 border border-gray-200 text-gray-400"
-                          : "bg-blue-50 border border-blue-200 text-blue-700"
+                          ? "bg-green-100 dark:bg-green-900/50 border border-green-300 dark:border-green-700 text-green-800 dark:text-green-300"
+                          : isBooked
+                          ? "bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-600 dark:text-green-400"
+                          : "bg-blue-100 dark:bg-blue-900/50 border border-blue-300 dark:border-blue-700 text-blue-800 dark:text-blue-300"
                       }`}
+                      style={{
+                        top: `${startIdx * 28 + 1}px`,
+                        height: `${spanCount * 28 - 2}px`,
+                      }}
+                      onClick={(e) => { e.stopPropagation(); setSelectedSlot(slot); }}
                     >
-                      <div className="font-medium">{slot.startTime}-{slot.endTime}</div>
-                      <div className="text-[10px] opacity-70">{EVENT_TYPE_LABELS[slot.eventType]}</div>
-                      {slot.isBooked && (
-                        <div className="text-[10px] mt-0.5">
-                          {isConfirmed ? "確定済" : "予約済"}
-                        </div>
+                      <div className="font-medium leading-tight">{slot.startTime}-{slot.endTime}</div>
+                      {spanCount >= 2 && (
+                        <div className="opacity-70 truncate">{EVENT_TYPE_LABELS[slot.eventType]}</div>
                       )}
-                      {!slot.isBooked && (
-                        <button
-                          onClick={() => handleDelete(slot.id)}
-                          className="absolute top-1 right-1 p-0.5 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <TrashIcon className="w-3 h-3" />
-                        </button>
+                      {isBooked && spanCount >= 3 && (
+                        <div className="opacity-60">{isConfirmed ? "確定済" : "予約済"}</div>
                       )}
                     </div>
                   );
                 })}
+
+              {/* Google Calendar event blocks */}
+              {(gcalBlocksByDate.get(date) || []).map(({ ev, startIdx, spanCount }) => (
+                <div
+                  key={`gcal-${ev.id}`}
+                  className="absolute left-0.5 right-0.5 rounded-md px-1.5 py-0.5 text-[10px] overflow-hidden z-[5] bg-pink-50 dark:bg-pink-900/30 border border-pink-200 dark:border-pink-800 text-pink-600 dark:text-pink-400 opacity-75 pointer-events-none"
+                  style={{
+                    top: `${startIdx * 28 + 1}px`,
+                    height: `${spanCount * 28 - 2}px`,
+                  }}
+                >
+                  <div className="font-medium leading-tight truncate">
+                    {ev.allDay ? "終日" : `${ev.start.substring(11, 16)}-${ev.end.substring(11, 16)}`}
+                  </div>
+                  {spanCount >= 2 && (
+                    <div className="truncate opacity-80">{ev.title}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {/* Drag preview overlay text */}
+          {dragPreview && (
+            <div
+              className="absolute z-20 pointer-events-none flex items-center justify-center"
+              style={{
+                left: `calc(60px + ${weekDates.indexOf(dragPreview.day)} * ((100% - 60px) / 7))`,
+                width: `calc((100% - 60px) / 7)`,
+                top: `${dragPreview.startIdx * 28}px`,
+                height: `${(dragPreview.endIdx - dragPreview.startIdx) * 28}px`,
+              }}
+            >
+              <div className="bg-blue-500/80 text-white text-xs font-medium px-2 py-0.5 rounded-full shadow">
+                {indexToTime(dragPreview.startIdx)} - {indexToTime(dragPreview.endIdx)}
               </div>
             </div>
-          );
-        })}
+          )}
+        </div>
       </div>
+      )}
 
-      {/* Mobile: stacked rows */}
-      <div className="md:hidden space-y-2">
+      {/* ===== Mobile: Compact day view with time picker ===== */}
+      <div className="md:hidden space-y-2" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
         {weekDates.map(date => {
-          const slots = slotsByDate.get(date) || [];
-          const isToday = date === new Date().toISOString().split("T")[0];
+          const isToday = date === todayStr;
+          const d = new Date(date + "T00:00:00");
+          const dayNames = ["日", "月", "火", "水", "木", "金", "土"];
+          const dayOfWeek = dayNames[d.getDay()];
+          const dateSlots = mySlots.filter(s => s.date === date).sort((a, b) => a.startTime.localeCompare(b.startTime));
+          const gcalForDate = calendarEvents.filter(ev => {
+            const dateStr = ev.start.length > 10 ? ev.start.substring(0, 10) : ev.start;
+            return dateStr === date;
+          });
+          const isExpanded = mobileSelectedDate === date;
+
           return (
-            <div key={date} className={`bg-white dark:bg-gray-800 rounded-xl border ${isToday ? "border-blue-300 dark:border-blue-600 ring-1 ring-blue-100 dark:ring-blue-800" : "border-gray-200 dark:border-gray-700"} p-3`}>
-              <div className={`text-sm font-medium mb-2 ${isToday ? "text-blue-600" : "text-gray-700"}`}>
-                {formatDate(date)}
-              </div>
-              {slots.length === 0 ? (
-                <p className="text-xs text-gray-300">枠なし</p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {slots.map(slot => {
+            <div key={date} className={`bg-white dark:bg-gray-800 rounded-xl border ${isToday ? "border-blue-300 dark:border-blue-600" : "border-gray-200 dark:border-gray-700"} overflow-hidden`}>
+              <button
+                onClick={() => setMobileSelectedDate(isExpanded ? null : date)}
+                className="w-full flex items-center justify-between p-3"
+              >
+                <div className="flex items-center gap-2">
+                  <div className={`text-sm font-medium ${isToday ? "text-blue-600 dark:text-blue-400" : "text-gray-800 dark:text-gray-200"}`}>
+                    {d.getMonth() + 1}/{d.getDate()} ({dayOfWeek})
+                  </div>
+                  {dateSlots.length > 0 && (
+                    <span className="text-[10px] bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded-full font-medium">
+                      {dateSlots.length}枠
+                    </span>
+                  )}
+                </div>
+                <ChevronIcon direction={isExpanded ? "down" : "right"} className="w-4 h-4 text-gray-400" />
+              </button>
+
+              {/* Existing slots compact */}
+              {(dateSlots.length > 0 || gcalForDate.length > 0) && !isExpanded && (
+                <div className="px-3 pb-2 flex flex-wrap gap-1">
+                  {dateSlots.map(slot => {
                     const booking = getBookingForSlot(slot);
                     const isConfirmed = booking?.status === "confirmed";
                     return (
-                      <div
+                      <span
                         key={slot.id}
-                        className={`rounded-lg px-2.5 py-1.5 text-xs flex items-center gap-1.5 ${
-                          isConfirmed
-                            ? "bg-green-50 border border-green-200 text-green-700"
-                            : slot.isBooked
-                            ? "bg-gray-100 border border-gray-200 text-gray-400"
-                            : "bg-blue-50 border border-blue-200 text-blue-700"
+                        className={`text-[10px] px-2 py-0.5 rounded-full ${
+                          isConfirmed || slot.isBooked
+                            ? "bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300"
+                            : "bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300"
                         }`}
                       >
-                        <span className="font-medium">{slot.startTime}-{slot.endTime}</span>
-                        <span className="opacity-70">{EVENT_TYPE_LABELS[slot.eventType]}</span>
-                        {slot.isBooked && (
-                          <span className="text-[10px]">{isConfirmed ? "確定済" : "予約済"}</span>
-                        )}
-                        {!slot.isBooked && (
-                          <button
-                            onClick={() => handleDelete(slot.id)}
-                            className="p-0.5 text-gray-300 hover:text-red-500 transition-colors"
-                          >
-                            <TrashIcon className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
+                        {slot.startTime}-{slot.endTime}
+                      </span>
                     );
                   })}
+                  {gcalForDate.map(ev => (
+                    <span key={`gcal-${ev.id}`} className="text-[10px] px-2 py-0.5 rounded-full bg-pink-100 dark:bg-pink-900/30 text-pink-600 dark:text-pink-400">
+                      {ev.allDay ? "終日" : `${ev.start.substring(11, 16)}`} {ev.title.substring(0, 8)}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Expanded: time picker */}
+              {isExpanded && (
+                <div className="border-t border-gray-100 dark:border-gray-700 p-3">
+                  {/* Existing slots in detail */}
+                  {dateSlots.length > 0 && (
+                    <div className="mb-3 space-y-1.5">
+                      {dateSlots.map(slot => {
+                        const booking = getBookingForSlot(slot);
+                        const isConfirmed = booking?.status === "confirmed";
+                        return (
+                          <div
+                            key={slot.id}
+                            className={`flex items-center justify-between rounded-lg px-3 py-2 text-xs ${
+                              isConfirmed || slot.isBooked
+                                ? "bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300"
+                                : "bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300"
+                            }`}
+                          >
+                            <div>
+                              <span className="font-medium">{slot.startTime}-{slot.endTime}</span>
+                              <span className="ml-2 opacity-70">{EVENT_TYPE_LABELS[slot.eventType]}</span>
+                              {slot.isBooked && <span className="ml-1 opacity-60">({isConfirmed ? "確定済" : "予約済"})</span>}
+                            </div>
+                            {!slot.isBooked && (
+                              <button
+                                onClick={() => handleDeleteSlot(slot.id)}
+                                className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                              >
+                                <TrashIcon className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Google Calendar events */}
+                  {gcalForDate.length > 0 && (
+                    <div className="mb-3 space-y-1.5">
+                      {gcalForDate.map(ev => (
+                        <div key={`gcal-${ev.id}`} className="rounded-lg px-3 py-2 text-xs bg-pink-50 dark:bg-pink-900/20 border border-pink-200 dark:border-pink-800 text-pink-600 dark:text-pink-400 opacity-75">
+                          <span className="font-medium">{ev.allDay ? "終日" : `${ev.start.substring(11, 16)}-${ev.end.substring(11, 16)}`}</span>
+                          <span className="ml-2">{ev.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Time buttons for adding */}
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">タップで1時間枠を追加:</p>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {CALENDAR_TIMES.filter(t => {
+                      const [h, m] = t.split(":").map(Number);
+                      return h * 60 + m + 60 <= 21 * 60;
+                    }).map(time => {
+                      const dateMap = slotMap.get(date);
+                      const idx = timeToIndex(time);
+                      const hasSlot = dateMap?.has(idx);
+                      return (
+                        <button
+                          key={time}
+                          disabled={!!hasSlot}
+                          onClick={() => handleMobileTimeClick(date, time)}
+                          className={`py-1.5 text-xs rounded-md transition-colors ${
+                            hasSlot
+                              ? "bg-gray-100 dark:bg-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed"
+                              : "border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700"
+                          }`}
+                        >
+                          {time}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
@@ -378,205 +896,99 @@ function SlotsTab({
         })}
       </div>
 
-      {/* Add Slot Modal */}
-      {showModal && (
-        <AddSlotModal
-          staffId={myProfile.id}
-          onAdd={(slots) => {
-            if (slots.length === 1) {
-              addTimeSlot(slots[0]);
-              setToast("空き枠を追加しました");
-            } else {
-              addTimeSlots(slots);
-              setToast(`${slots.length}件の空き枠を追加しました`);
-            }
-          }}
-          onClose={() => setShowModal(false)}
-        />
+      {/* ===== Confirm Dialog ===== */}
+      {confirmDialog && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-sm">
+            <div className="p-5">
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">空き枠を追加</h3>
+              <div className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-3 mb-4">
+                <div className="text-sm font-medium text-blue-800 dark:text-blue-300">
+                  {formatDate(confirmDialog.date)}
+                </div>
+                <div className="text-lg font-bold text-blue-900 dark:text-blue-200 mt-1">
+                  {confirmDialog.startTime} 〜 {confirmDialog.endTime}
+                </div>
+              </div>
+              <div className="mb-4">
+                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">イベント種別</label>
+                <select
+                  value={eventType}
+                  onChange={e => setEventType(e.target.value as EventType)}
+                  className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {(Object.entries(EVENT_TYPE_LABELS) as [EventType, string][]).map(([key, label]) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setConfirmDialog(null)}
+                  className="flex-1 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={handleConfirmAdd}
+                  className="flex-1 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                >
+                  追加する
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
-    </div>
-  );
-}
 
-// =============================================
-// 空き枠追加モーダル
-// =============================================
-
-function AddSlotModal({
-  staffId,
-  onAdd,
-  onClose,
-}: {
-  staffId: string;
-  onAdd: (slots: Omit<TimeSlot, "id">[]) => void;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleEsc);
-    return () => document.removeEventListener("keydown", handleEsc);
-  }, [onClose]);
-
-  const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
-  const [startTime, setStartTime] = useState("10:00");
-  const [eventType, setEventType] = useState<EventType>("orientation");
-  const [bulkMode, setBulkMode] = useState(false);
-  const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
-
-  const next14Days = useMemo(() => getNext14Days(), []);
-
-  // 終了時間は開始時間 + 1時間で自動計算
-  const endTime = useMemo(() => {
-    const [h, m] = startTime.split(":").map(Number);
-    const totalMin = h * 60 + m + 60;
-    const endH = Math.floor(totalMin / 60);
-    const endM = totalMin % 60;
-    return `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
-  }, [startTime]);
-
-  const toggleDate = (d: string) => {
-    setSelectedDates(prev => {
-      const next = new Set(prev);
-      if (next.has(d)) next.delete(d);
-      else next.add(d);
-      return next;
-    });
-  };
-
-  const handleSubmit = () => {
-    if (bulkMode) {
-      if (selectedDates.size === 0) return;
-      const slots = Array.from(selectedDates).map(d => ({
-        staffId,
-        date: d,
-        startTime,
-        endTime,
-        eventType,
-        isBooked: false,
-      }));
-      onAdd(slots);
-    } else {
-      onAdd([{ staffId, date, startTime, endTime, eventType, isBooked: false }]);
-    }
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100">空き枠を追加</h3>
-          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
-            <CloseIcon className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-5 space-y-4">
-          {/* Bulk toggle */}
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={bulkMode}
-              onChange={e => setBulkMode(e.target.checked)}
-              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-            />
-            <span className="text-sm text-gray-700">複数日に追加</span>
-          </label>
-
-          {/* Date selection */}
-          {bulkMode ? (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">日程を選択</label>
-              <div className="grid grid-cols-2 gap-1.5 max-h-56 overflow-y-auto border border-gray-200 rounded-lg p-3">
-                {next14Days.map(d => (
-                  <label
-                    key={d}
-                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md text-sm cursor-pointer transition-colors ${
-                      selectedDates.has(d) ? "bg-blue-50 text-blue-700" : "hover:bg-gray-50 text-gray-700"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedDates.has(d)}
-                      onChange={() => toggleDate(d)}
-                      className="w-3.5 h-3.5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                    />
-                    {formatDate(d)}
-                  </label>
-                ))}
+      {/* ===== Slot Detail Popover ===== */}
+      {selectedSlot && (
+        <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" onClick={() => setSelectedSlot(null)}>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-xs" onClick={e => e.stopPropagation()}>
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100 text-sm">枠の詳細</h3>
+                <button onClick={() => setSelectedSlot(null)} className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
+                  <CloseIcon className="w-4 h-4" />
+                </button>
               </div>
-            </div>
-          ) : (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">日付</label>
-              <input
-                type="date"
-                value={date}
-                onChange={e => setDate(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-          )}
-
-          {/* Time */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">開始時間</label>
-              <select
-                value={startTime}
-                onChange={e => setStartTime(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {TIME_OPTIONS.filter(t => {
-                  const [h, m] = t.split(":").map(Number);
-                  return h * 60 + m + 60 <= 21 * 60; // 終了が21:00以内
-                }).map(t => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">終了時間</label>
-              <div className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-700">
-                {endTime}
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500 dark:text-gray-400">日付</span>
+                  <span className="font-medium text-gray-900 dark:text-gray-100">{formatDate(selectedSlot.date)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500 dark:text-gray-400">時間</span>
+                  <span className="font-medium text-gray-900 dark:text-gray-100">{selectedSlot.startTime} - {selectedSlot.endTime}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500 dark:text-gray-400">種別</span>
+                  <span className="font-medium text-gray-900 dark:text-gray-100">{EVENT_TYPE_LABELS[selectedSlot.eventType]}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500 dark:text-gray-400">状態</span>
+                  <span className={`font-medium ${
+                    selectedSlot.isBooked ? "text-green-600 dark:text-green-400" : "text-blue-600 dark:text-blue-400"
+                  }`}>
+                    {selectedSlot.isBooked
+                      ? (getBookingForSlot(selectedSlot)?.status === "confirmed" ? "確定済み" : "予約済み")
+                      : "空き"
+                    }
+                  </span>
+                </div>
               </div>
-              <p className="text-xs text-gray-400 mt-1">※ 説明会1時間</p>
+              {!selectedSlot.isBooked && (
+                <button
+                  onClick={() => handleDeleteSlot(selectedSlot.id)}
+                  className="w-full mt-4 flex items-center justify-center gap-1.5 py-2 text-sm text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
+                >
+                  <TrashIcon className="w-3.5 h-3.5" /> 削除する
+                </button>
+              )}
             </div>
-          </div>
-
-          {/* Event type */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">イベント種別</label>
-            <select
-              value={eventType}
-              onChange={e => setEventType(e.target.value as EventType)}
-              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {(Object.entries(EVENT_TYPE_LABELS) as [EventType, string][]).map(([key, label]) => (
-                <option key={key} value={key}>{label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Buttons */}
-          <div className="flex gap-2 pt-2">
-            <button
-              onClick={onClose}
-              className="flex-1 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
-              キャンセル
-            </button>
-            <button
-              onClick={handleSubmit}
-              className="flex-1 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              {bulkMode ? `${selectedDates.size}件追加` : "追加"}
-            </button>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

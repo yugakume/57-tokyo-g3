@@ -123,14 +123,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/links", label: "業務リンク集", icon: LinkListIcon },
     { href: "/accounts", label: "アカウント情報", icon: KeyIcon },
     { href: "/schedule", label: "スケジュール", icon: CalendarIcon },
-    { href: "/minutes", label: "MTG議事録", icon: DocumentIcon },
+    { href: "/meeting", label: "ミーティング", icon: DocumentIcon },
     { href: "/tasks", label: "タスク", icon: ClipboardIcon },
     { href: "/members", label: "メンバー", icon: UsersIcon },
     { href: "/calendar", label: "カレンダー", icon: CalendarIcon },
     ...(isAdmin ? [{ href: "/admin", label: "管理", icon: SettingsIcon }] : []),
   ];
 
-  const isActive = (href: string) => pathname === href;
+  const isActive = (href: string) => pathname === href || pathname === href + "/" || (href !== "/dashboard" && pathname.startsWith(href + "/"));
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col md:flex-row">
@@ -219,13 +219,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-colors nav-link-underline ${
+              className={`relative flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-all nav-link-underline ${
                 isActive(item.href)
-                  ? "bg-blue-50 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 font-medium"
+                  ? "bg-blue-50 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 font-semibold shadow-sm"
                   : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
               }`}
             >
-              <item.icon className="w-5 h-5" />
+              {isActive(item.href) && (
+                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-blue-600 dark:bg-blue-400 rounded-r-full" />
+              )}
+              <item.icon className={`w-5 h-5 ${isActive(item.href) ? "text-blue-600 dark:text-blue-400" : ""}`} />
               {item.label}
             </Link>
           ))}

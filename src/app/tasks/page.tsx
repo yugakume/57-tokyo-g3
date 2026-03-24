@@ -162,7 +162,7 @@ export default function TasksPage() {
       }
       setCompletedTaskId(id);
       updateTaskStatus(id, newStatus);
-      showToast("タスク完了！🎉", "done");
+      showToast("タスク完了！🎉 「完了」列に移動しました", "done");
       setTimeout(() => {
         setCompletedTaskId(null);
         setConfettiOrigin(null);
@@ -731,7 +731,7 @@ function TaskModal({
                   <button
                     key={q.label}
                     type="button"
-                    onClick={() => setDueDate(q.date)}
+                    onClick={() => { setDueDate(q.date); if (!dueTime) setDueTime("18:00"); }}
                     className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
                       dueDate === q.date
                         ? "border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"

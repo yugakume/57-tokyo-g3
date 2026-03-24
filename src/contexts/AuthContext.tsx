@@ -36,6 +36,9 @@ interface AuthContextType {
   removeAllowedEmail: (email: string) => void;
   addAdminEmail: (email: string) => void;
   removeAdminEmail: (email: string) => void;
+  // Googleカレンダー連携
+  calendarAccessToken: string | null;
+  requestCalendarAccess: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -55,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [allowedEmails, setAllowedEmails] = useState<string[]>([]);
   const [adminEmails, setAdminEmails] = useState<string[]>([]);
+  const [calendarAccessToken, setCalendarAccessToken] = useState<string | null>(null);
 
   // 初期化: Firestoreから許可メール・管理者メールをリアルタイム購読
   useEffect(() => {
@@ -246,6 +250,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await setDoc(doc(db, "settings", "adminEmails"), { emails: next });
   }, [adminEmails]);
 
+  // Googleカレンダー APIへのアクセストークンを取得する関数
+  const requestCalendarAccess = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const g = (window as unknown as Record<string, unknown>).google as
+      | { accounts: { oauth2: { initTokenClient: (config: Record<string, unknown>) => { requestAccessToken: () => void } } } }
+      | undefined;
+    if (!g?.accounts?.oauth2) {
+      alert("Google Identity Services の読み込みに失敗しました。ページを再読み込みしてください。");
+      return;
+    }
+
+    const tokenClient = g.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: 'https://www.googleapis.com/auth/calendar.events.readonly',
+      callback: (response: Record<string, unknown>) => {
+        if (response.access_token) {
+          setCalendarAccessToken(response.access_token as string);
+        }
+      },
+    });
+    tokenClient.requestAccessToken();
+  }, []);
+
   const isAdmin = user?.role === "admin";
 
   return (
@@ -254,6 +281,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isDemoMode: DEMO_MODE,
       allowedEmails, adminEmails,
       addAllowedEmail, removeAllowedEmail, addAdminEmail, removeAdminEmail,
+      calendarAccessToken, requestCalendarAccess,
     }}>
       {children}
     </AuthContext.Provider>
