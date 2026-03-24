@@ -23,6 +23,14 @@ const TaskContext = createContext<TaskContextType | undefined>(undefined);
 // Provider
 // =============================================
 
+const cleanData = (obj: Record<string, unknown>) => {
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) cleaned[key] = value;
+  }
+  return cleaned;
+};
+
 export function TaskProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -47,7 +55,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     };
     setTasks((prev) => [newTask, ...prev]);
     const { id, ...data } = newTask;
-    setDoc(doc(db, "tasks", id), data);
+    setDoc(doc(db, "tasks", id), cleanData(data as unknown as Record<string, unknown>));
     return newTask;
   }, []);
 
@@ -56,7 +64,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     setTasks((prev) =>
       prev.map((t) => (t.id === id ? { ...t, ...updates, updatedAt } : t))
     );
-    setDoc(doc(db, "tasks", id), { ...updates, updatedAt }, { merge: true });
+    setDoc(doc(db, "tasks", id), cleanData({ ...updates, updatedAt } as unknown as Record<string, unknown>), { merge: true });
   }, []);
 
   const deleteTask = useCallback((id: string) => {

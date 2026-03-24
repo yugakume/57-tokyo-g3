@@ -262,3 +262,14 @@ export function CheckIcon({ className = "w-4 h-4" }: { className?: string }) {
     </svg>
   );
 }
+
+export function CurrencyIcon({ className = "w-5 h-5" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M16 8H10a2 2 0 100 4h4a2 2 0 010 4H8" />
+      <line x1="12" y1="6" x2="12" y2="8" />
+      <line x1="12" y1="16" x2="12" y2="18" />
+    </svg>
+  );
+}

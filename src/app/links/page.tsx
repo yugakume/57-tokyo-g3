@@ -148,11 +148,11 @@ function LinksPageContent() {
               const catLinks = groupedLinks?.[cat.id];
               if (!catLinks || catLinks.length === 0) return null;
               return (
-                <div key={cat.id} className="bg-white rounded-xl border border-gray-200">
-                  <div className="px-4 py-3 border-b border-gray-100">
+                <div key={cat.id} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                  <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
                     <h2 className="font-semibold text-gray-900 dark:text-gray-100 text-sm">{cat.name}</h2>
                     {cat.description && (
-                      <p className="text-xs text-gray-400">{cat.description}</p>
+                      <p className="text-xs text-gray-400 dark:text-gray-500">{cat.description}</p>
                     )}
                   </div>
                   <div className="divide-y divide-gray-50 dark:divide-gray-700">
@@ -177,18 +177,18 @@ function LinkCard({ link }: { link: import("@/types").LinkItem }) {
       rel="noopener noreferrer"
       className="flex items-center gap-3 px-4 py-3 hover:bg-blue-50/50 dark:hover:bg-gray-700/50 transition-colors group"
     >
-      <div className="w-9 h-9 bg-gray-50 dark:bg-gray-800 rounded-lg flex items-center justify-center shrink-0 group-hover:bg-blue-100 transition-colors">
-        <LinkIcon type={link.icon} className="w-4 h-4 text-gray-500 group-hover:text-blue-600" />
+      <div className="w-9 h-9 bg-gray-50 dark:bg-gray-700 rounded-lg flex items-center justify-center shrink-0 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/50 transition-colors">
+        <LinkIcon type={link.icon} className="w-4 h-4 text-gray-500 dark:text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600 transition-colors truncate">
+        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors truncate">
           {link.title}
         </p>
         {link.description && (
-          <p className="text-xs text-gray-400 truncate">{link.description}</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{link.description}</p>
         )}
       </div>
-      <ExternalLinkIcon className="w-4 h-4 text-gray-300 group-hover:text-blue-400 shrink-0" />
+      <ExternalLinkIcon className="w-4 h-4 text-gray-300 dark:text-gray-600 group-hover:text-blue-400 shrink-0" />
     </a>
   );
 }

@@ -1304,7 +1304,6 @@ function ProfileTab({
   const [furigana, setFurigana] = useState(myProfile?.furigana ?? "");
   const [grade, setGrade] = useState(myProfile?.grade ?? "");
   const [gender, setGender] = useState<"male" | "female" | "other">(myProfile?.gender ?? "male");
-  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>(myProfile?.roleIds ?? []);
   const [nearestStation, setNearestStation] = useState(myProfile?.nearestStation ?? "");
   const [isEditing, setIsEditing] = useState(!myProfile);
 
@@ -1316,37 +1315,21 @@ function ProfileTab({
       setFurigana(myProfile.furigana ?? "");
       setGrade(myProfile.grade);
       setGender(myProfile.gender);
-      setSelectedRoleIds(myProfile.roleIds ?? []);
       setNearestStation(myProfile.nearestStation ?? "");
     }
   }, [myProfile]);
 
-  const toggleRole = (roleId: string) => {
-    setSelectedRoleIds(prev =>
-      prev.includes(roleId) ? prev.filter(r => r !== roleId) : [...prev, roleId]
-    );
-  };
-
-  const getRoleNames = (roleIds: string[]) => {
-    return roleIds
-      .map(id => staffRoles.find(r => r.id === id)?.name)
-      .filter(Boolean)
-      .join(", ");
-  };
-
   const handleSave = () => {
     if (!lastName.trim() || !grade.trim()) return;
     if (myProfile) {
-      updateStaffProfile(myProfile.id, { lastName: lastName.trim(), fullName: fullName.trim() || undefined, furigana: furigana.trim() || undefined, grade: grade.trim(), gender, roleIds: selectedRoleIds, nearestStation: nearestStation.trim() || undefined });
+      updateStaffProfile(myProfile.id, { lastName: lastName.trim(), fullName: fullName.trim() || undefined, furigana: furigana.trim() || undefined, grade: grade.trim(), gender, roleIds: myProfile.roleIds ?? [], nearestStation: nearestStation.trim() || undefined });
       setToast("プロフィールを更新しました");
     } else {
-      addStaffProfile({ email: userEmail, lastName: lastName.trim(), fullName: fullName.trim() || undefined, furigana: furigana.trim() || undefined, grade: grade.trim(), gender, roleIds: selectedRoleIds, nearestStation: nearestStation.trim() || undefined });
+      addStaffProfile({ email: userEmail, lastName: lastName.trim(), fullName: fullName.trim() || undefined, furigana: furigana.trim() || undefined, grade: grade.trim(), gender, roleIds: [], nearestStation: nearestStation.trim() || undefined });
       setToast("プロフィールを登録しました");
     }
     setIsEditing(false);
   };
-
-  const sortedRoles = [...staffRoles].sort((a, b) => a.order - b.order);
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 max-w-lg">
@@ -1470,28 +1453,23 @@ function ProfileTab({
 
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">役職・部署</label>
-            <div className="border border-gray-200 rounded-lg p-3 max-h-48 overflow-y-auto space-y-1">
-              {sortedRoles.length === 0 ? (
-                <p className="text-xs text-gray-400">ロールが登録されていません。管理パネルから追加してください。</p>
+            <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-3 bg-gray-50 dark:bg-gray-700">
+              {(myProfile?.roleIds ?? []).length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {(myProfile?.roleIds ?? []).map(roleId => {
+                    const role = staffRoles.find(r => r.id === roleId);
+                    return role ? (
+                      <span key={roleId} className="text-xs bg-indigo-50 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-600 rounded-full px-2.5 py-0.5">
+                        {role.name}
+                      </span>
+                    ) : null;
+                  })}
+                </div>
               ) : (
-                sortedRoles.map(role => (
-                  <label key={role.id} className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-sm cursor-pointer transition-colors ${
-                    selectedRoleIds.includes(role.id) ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-50"
-                  }`}>
-                    <input
-                      type="checkbox"
-                      checked={selectedRoleIds.includes(role.id)}
-                      onChange={() => toggleRole(role.id)}
-                      className="w-3.5 h-3.5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                    />
-                    {role.name}
-                  </label>
-                ))
+                <p className="text-xs text-gray-400 dark:text-gray-500">未設定</p>
               )}
             </div>
-            {selectedRoleIds.length > 0 && (
-              <p className="text-xs text-indigo-600 mt-1">{getRoleNames(selectedRoleIds)}</p>
-            )}
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">ロールの変更は管理者パネルから行えます</p>
           </div>
 
           <div>
@@ -1513,7 +1491,7 @@ function ProfileTab({
           <div className="flex gap-2 pt-2">
             {myProfile && (
               <button
-                onClick={() => { setIsEditing(false); setLastName(myProfile.lastName); setFullName(myProfile.fullName ?? ""); setFurigana(myProfile.furigana ?? ""); setGrade(myProfile.grade); setGender(myProfile.gender); setSelectedRoleIds(myProfile.roleIds ?? []); setNearestStation(myProfile.nearestStation ?? ""); }}
+                onClick={() => { setIsEditing(false); setLastName(myProfile.lastName); setFullName(myProfile.fullName ?? ""); setFurigana(myProfile.furigana ?? ""); setGrade(myProfile.grade); setGender(myProfile.gender); setNearestStation(myProfile.nearestStation ?? ""); }}
                 className="flex-1 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 キャンセル

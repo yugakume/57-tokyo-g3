@@ -376,15 +376,15 @@ export default function DashboardPage() {
   ];
 
   const colorMap: Record<string, string> = {
-    blue: "bg-blue-50 text-blue-600 border-blue-100",
-    emerald: "bg-emerald-50 text-emerald-600 border-emerald-100",
-    purple: "bg-purple-50 text-purple-600 border-purple-100",
+    blue: "text-blue-600 dark:text-blue-400 border-blue-100 dark:border-blue-800",
+    emerald: "text-emerald-600 dark:text-emerald-400 border-emerald-100 dark:border-emerald-800",
+    purple: "text-purple-600 dark:text-purple-400 border-purple-100 dark:border-purple-800",
   };
 
   const iconBgMap: Record<string, string> = {
-    blue: "bg-blue-100",
-    emerald: "bg-emerald-100",
-    purple: "bg-purple-100",
+    blue: "bg-blue-100 dark:bg-blue-900/50",
+    emerald: "bg-emerald-100 dark:bg-emerald-900/50",
+    purple: "bg-purple-100 dark:bg-purple-900/50",
   };
 
   function handleAddCountdown() {
@@ -473,6 +473,15 @@ export default function DashboardPage() {
                   </div>
                 ))}
               </div>
+              <a
+                href="https://www.google.com/search?q=%E6%9D%B1%E4%BA%AC+%E5%A4%A9%E6%B0%97"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 mt-1.5 transition-colors"
+              >
+                <span>詳しく見る</span>
+                <ExternalLinkIcon className="w-3 h-3" />
+              </a>
             </div>
           )}
           {widgetVisibility.weather && weatherError && !weather && (
@@ -618,7 +627,7 @@ export default function DashboardPage() {
                       href={`https://www.google.com/maps/dir/${encodeURIComponent(myProfile.nearestStation!)}/${encodeURIComponent(nextMeeting.venueStation)}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs bg-white text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-700 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
                     >
                       <ExternalLinkIcon className="w-3.5 h-3.5" />
                       経路を確認
@@ -627,7 +636,7 @@ export default function DashboardPage() {
                       href={`https://transit.yahoo.co.jp/search/result?from=${encodeURIComponent(myProfile.nearestStation!.replace(/駅$/, ""))}&to=${encodeURIComponent(nextMeeting.venueStation.replace(/駅$/, ""))}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs bg-white text-orange-600 border border-orange-200 rounded-lg hover:bg-orange-50 transition-colors"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs bg-white dark:bg-gray-700 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-700 rounded-lg hover:bg-orange-50 dark:hover:bg-orange-900/30 transition-colors"
                     >
                       {"\uD83D\uDE83"} 交通費を調べる（Yahoo!乗換案内）
                     </a>
@@ -637,7 +646,7 @@ export default function DashboardPage() {
                   href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(nextMeeting.title)}&dates=${nextMeeting.date.replace(/-/g, "")}T${nextMeeting.startTime.replace(":", "")}00/${nextMeeting.date.replace(/-/g, "")}T${nextMeeting.endTime.replace(":", "")}00&location=${encodeURIComponent(nextMeeting.venue || "")}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs bg-white text-green-600 border border-green-200 rounded-lg hover:bg-green-50 transition-colors"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs bg-white dark:bg-gray-700 text-green-600 dark:text-green-400 border border-green-200 dark:border-green-700 rounded-lg hover:bg-green-50 dark:hover:bg-green-900/30 transition-colors"
                 >
                   <ExternalLinkIcon className="w-3.5 h-3.5" />
                   カレンダーに追加
@@ -741,7 +750,7 @@ export default function DashboardPage() {
               </div>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {countdowns.map(cd => {
+              {[...countdowns].sort((a, b) => a.targetDate.localeCompare(b.targetDate)).map(cd => {
                 const { text, isToday, isPast } = getCountdownText(cd.targetDate);
                 return (
                   <div

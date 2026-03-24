@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
 import { useTheme } from "@/contexts/ThemeContext";
-import { MenuIcon, CloseIcon, HomeIcon, LinkListIcon, KeyIcon, CalendarIcon, DocumentIcon, ClipboardIcon, UsersIcon, SettingsIcon, LogOutIcon, EditIcon } from "./Icons";
+import { MenuIcon, CloseIcon, HomeIcon, LinkListIcon, KeyIcon, CalendarIcon, DocumentIcon, ClipboardIcon, UsersIcon, SettingsIcon, LogOutIcon, EditIcon, BellIcon, CurrencyIcon } from "./Icons";
 import type { StaffProfile } from "@/types";
 
 export default function Header() {
@@ -120,10 +120,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { href: "/dashboard", label: "ホーム", icon: HomeIcon },
+    { href: "/news", label: "お知らせ", icon: BellIcon },
     { href: "/links", label: "業務リンク集", icon: LinkListIcon },
     { href: "/accounts", label: "アカウント情報", icon: KeyIcon },
     { href: "/schedule", label: "スケジュール", icon: CalendarIcon },
     { href: "/meeting", label: "ミーティング", icon: DocumentIcon },
+    { href: "/expenses", label: "交通費", icon: CurrencyIcon },
     { href: "/tasks", label: "タスク", icon: ClipboardIcon },
     { href: "/members", label: "メンバー", icon: UsersIcon },
     { href: "/calendar", label: "カレンダー", icon: CalendarIcon },
@@ -468,7 +470,7 @@ function ProfileModal({
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
-                  if (file.size > 500 * 1024) { alert("画像は500KB以下にしてください"); return; }
+                  if (file.size > 2 * 1024 * 1024) { alert("画像は2MB以下にしてください"); return; }
                   const reader = new FileReader();
                   reader.onload = (ev) => { setPhotoURL(ev.target?.result as string); };
                   reader.readAsDataURL(file);

@@ -7,6 +7,7 @@ import { useMeetingMinutes } from "@/contexts/MeetingMinutesContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
 import { useTask } from "@/contexts/TaskContext";
 import { ChevronIcon, CloseIcon } from "@/components/Icons";
+import type { MeetingMinutes as MeetingMinutesType } from "@/types";
 
 // =============================================
 // 型定義
@@ -44,7 +45,7 @@ function formatDateStr(year: number, month: number, day: number): string {
 
 export default function CalendarPage() {
   const { user, isLoading } = useAuth();
-  const { minutes } = useMeetingMinutes();
+  const { minutes, updateAttendance } = useMeetingMinutes();
   const { timeSlots, staffProfiles } = useSchedule();
   const { tasks } = useTask();
   const router = useRouter();
@@ -64,6 +65,37 @@ export default function CalendarPage() {
     staffProfiles.forEach(p => { map[p.id] = p.fullName || p.lastName; });
     return map;
   }, [staffProfiles]);
+
+  // Birthday map: MM-DD -> staff names
+  const birthdayByDate = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    staffProfiles.forEach(p => {
+      if (!p.birthday) return;
+      // birthday can be YYYY-MM-DD or MM-DD
+      const parts = p.birthday.split("-");
+      let mmdd: string;
+      if (parts.length === 3 && parts[0].length === 4) {
+        mmdd = `${parts[1]}-${parts[2]}`;
+      } else if (parts.length === 2) {
+        mmdd = p.birthday;
+      } else {
+        return;
+      }
+      if (!map[mmdd]) map[mmdd] = [];
+      map[mmdd].push(p.fullName || p.lastName || p.email);
+    });
+    return map;
+  }, [staffProfiles]);
+
+  // MTG by date for attendance buttons
+  const mtgByDate = useMemo(() => {
+    const map: Record<string, MeetingMinutesType[]> = {};
+    minutes.forEach(m => {
+      if (!map[m.date]) map[m.date] = [];
+      map[m.date].push(m);
+    });
+    return map;
+  }, [minutes]);
 
   // イベントを集約
   const events = useMemo(() => {
@@ -231,20 +263,20 @@ export default function CalendarPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={goToPrevMonth}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            className="p-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             aria-label="前月"
           >
-            <ChevronIcon direction="left" className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+            <ChevronIcon direction="left" className="w-5 h-5" />
           </button>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 min-w-[140px] text-center">
             {currentYear}年{currentMonth + 1}月
           </h2>
           <button
             onClick={goToNextMonth}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            className="p-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             aria-label="次月"
           >
-            <ChevronIcon direction="right" className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+            <ChevronIcon direction="right" className="w-5 h-5" />
           </button>
         </div>
         <button
@@ -294,6 +326,8 @@ export default function CalendarPage() {
               const isToday = dateStr === todayStr;
               const isSelected = dateStr === selectedDate;
               const dayOfWeek = new Date(currentYear, currentMonth, day).getDay();
+              const mmdd = `${String(currentMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+              const birthdayNames = birthdayByDate[mmdd] || [];
 
               return (
                 <button
@@ -305,19 +339,24 @@ export default function CalendarPage() {
                       : "hover:bg-gray-50 dark:hover:bg-gray-800"
                   }`}
                 >
-                  <span
-                    className={`inline-flex items-center justify-center w-6 h-6 sm:w-7 sm:h-7 text-xs sm:text-sm rounded-full ${
-                      isToday
-                        ? "bg-blue-600 text-white font-bold"
-                        : dayOfWeek === 0
-                        ? "text-red-500"
-                        : dayOfWeek === 6
-                        ? "text-blue-500"
-                        : "text-gray-700 dark:text-gray-300"
-                    }`}
-                  >
-                    {day}
-                  </span>
+                  <div className="flex items-center gap-0.5">
+                    <span
+                      className={`inline-flex items-center justify-center w-6 h-6 sm:w-7 sm:h-7 text-xs sm:text-sm rounded-full ${
+                        isToday
+                          ? "bg-blue-600 text-white font-bold"
+                          : dayOfWeek === 0
+                          ? "text-red-500"
+                          : dayOfWeek === 6
+                          ? "text-blue-500"
+                          : "text-gray-700 dark:text-gray-300"
+                      }`}
+                    >
+                      {day}
+                    </span>
+                    {birthdayNames.length > 0 && (
+                      <span className="text-xs" title={birthdayNames.join(", ")}>🎂</span>
+                    )}
+                  </div>
                   {/* イベントドット（モバイル） */}
                   <div className="flex gap-0.5 mt-0.5 sm:hidden">
                     {dayEvents.length > 0 && (
@@ -375,29 +414,62 @@ export default function CalendarPage() {
               <p className="text-sm text-gray-400 dark:text-gray-500">この日の予定はありません</p>
             ) : (
               <div className="space-y-3">
-                {selectedEvents.map(event => (
-                  <div
-                    key={event.id}
-                    className={`rounded-lg p-3 ${typeColor[event.type].bg} border ${
-                      event.type === "mtg"
-                        ? "border-purple-200 dark:border-purple-700"
-                        : event.type === "orientation"
-                        ? "border-blue-200 dark:border-blue-700"
-                        : "border-orange-200 dark:border-orange-700"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`w-2 h-2 rounded-full ${typeColor[event.type].dot}`} />
-                      <span className={`text-xs font-medium ${typeColor[event.type].text}`}>
-                        {typeColor[event.type].label}
-                      </span>
-                      {event.time && (
-                        <span className="text-xs text-gray-500 dark:text-gray-400">{event.time}</span>
+                {selectedEvents.map(event => {
+                  // Find the matching MTG for attendance
+                  const mtgMatch = event.type === "mtg" && selectedDate
+                    ? (mtgByDate[selectedDate] || []).find(m => event.id === `mtg-${m.id}`)
+                    : null;
+                  const myStatus = mtgMatch?.attendance?.[user.email];
+
+                  return (
+                    <div
+                      key={event.id}
+                      className={`rounded-lg p-3 ${typeColor[event.type].bg} border ${
+                        event.type === "mtg"
+                          ? "border-purple-200 dark:border-purple-700"
+                          : event.type === "orientation"
+                          ? "border-blue-200 dark:border-blue-700"
+                          : "border-orange-200 dark:border-orange-700"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`w-2 h-2 rounded-full ${typeColor[event.type].dot}`} />
+                        <span className={`text-xs font-medium ${typeColor[event.type].text}`}>
+                          {typeColor[event.type].label}
+                        </span>
+                        {event.time && (
+                          <span className="text-xs text-gray-500 dark:text-gray-400">{event.time}</span>
+                        )}
+                      </div>
+                      <p className={`text-sm font-medium ${typeColor[event.type].text}`}>{event.title}</p>
+                      {/* Attendance buttons for MTG events */}
+                      {mtgMatch && (
+                        <div className="flex items-center gap-2 mt-2">
+                          {(["出席", "欠席", "遅刻"] as const).map(status => {
+                            const isActive = myStatus === status;
+                            const colors: Record<string, string> = {
+                              "出席": isActive ? "bg-green-600 text-white border-green-600" : "bg-white dark:bg-gray-700 text-green-700 dark:text-green-300 border-green-300 dark:border-green-600 hover:bg-green-50 dark:hover:bg-green-900/30",
+                              "欠席": isActive ? "bg-red-600 text-white border-red-600" : "bg-white dark:bg-gray-700 text-red-700 dark:text-red-300 border-red-300 dark:border-red-600 hover:bg-red-50 dark:hover:bg-red-900/30",
+                              "遅刻": isActive ? "bg-yellow-500 text-white border-yellow-500" : "bg-white dark:bg-gray-700 text-yellow-700 dark:text-yellow-300 border-yellow-300 dark:border-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/30",
+                            };
+                            return (
+                              <button
+                                key={status}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  updateAttendance(mtgMatch.id, user.email, isActive ? "未回答" : status);
+                                }}
+                                className={`px-3 py-1 text-xs rounded-lg border transition-colors ${colors[status]}`}
+                              >
+                                {status}
+                              </button>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
-                    <p className={`text-sm font-medium ${typeColor[event.type].text}`}>{event.title}</p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

@@ -12,9 +12,8 @@ import type { MeetingMinutes, MeetingLocation } from "@/types";
 // 時間オプション（30分刻み）
 // =============================================
 const TIME_OPTIONS: string[] = [];
-for (let h = 8; h <= 21; h++) {
+for (let h = 0; h <= 23; h++) {
   for (const m of [0, 30]) {
-    if (h === 21 && m === 30) break;
     TIME_OPTIONS.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
   }
 }
@@ -77,6 +76,7 @@ export default function MeetingPage() {
   const monthOptions = useMemo(() => {
     const months = new Set<string>();
     minutes.forEach(m => {
+      if (!m.date) return;
       const ym = m.date.slice(0, 7);
       months.add(ym);
     });
@@ -87,7 +87,7 @@ export default function MeetingPage() {
   const filteredMinutes = useMemo(() => {
     let list = [...minutes];
     if (filterMonth !== "all") {
-      list = list.filter(m => m.date.startsWith(filterMonth));
+      list = list.filter(m => m.date?.startsWith(filterMonth));
     }
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
@@ -97,13 +97,14 @@ export default function MeetingPage() {
         m.attendees.some(a => a.toLowerCase().includes(q))
       );
     }
-    return list.sort((a, b) => b.date.localeCompare(a.date));
+    return list.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
   }, [minutes, filterMonth, searchQuery]);
 
   // 月ごとグループ化
   const groupedMinutes = useMemo(() => {
     const groups: Record<string, MeetingMinutes[]> = {};
     filteredMinutes.forEach(m => {
+      if (!m.date) return;
       const ym = m.date.slice(0, 7);
       if (!groups[ym]) groups[ym] = [];
       groups[ym].push(m);
@@ -119,18 +120,18 @@ export default function MeetingPage() {
   const handleAdd = (data: Omit<MeetingMinutes, "id" | "createdAt" | "updatedAt">) => {
     addMinutes(data);
     setShowAddModal(false);
-    showToast("MTGを追加しました");
+    showToast("ミーティングを追加しました");
   };
 
   const handleUpdate = (data: Omit<MeetingMinutes, "id" | "createdAt" | "updatedAt">) => {
     if (!editingMinutes) return;
     updateMinutes(editingMinutes.id, data);
     setEditingMinutes(null);
-    showToast("MTGを更新しました");
+    showToast("ミーティングを更新しました");
   };
 
   const handleDelete = (id: string) => {
-    if (!confirm("このMTGを削除しますか？")) return;
+    if (!confirm("このミーティングを削除しますか？")) return;
     deleteMinutes(id);
     if (expandedId === id) setExpandedId(null);
     showToast("削除しました");
@@ -149,15 +150,15 @@ export default function MeetingPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">MTG</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">MTGの日程管理・出欠・議事録</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">ミーティング</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">ミーティングの日程管理・出欠・議事録</p>
         </div>
         <button
           onClick={() => setShowAddModal(true)}
           className="flex items-center gap-1.5 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
         >
           <PlusIcon className="w-4 h-4" />
-          MTGを追加
+          ミーティングを追加
         </button>
       </div>
 
@@ -181,7 +182,7 @@ export default function MeetingPage() {
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="タイトル・内容・出席者で検索"
-            className="pl-8 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-full"
+            className="pl-8 pr-3 py-1.5 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 w-full"
           />
         </div>
         <span className="text-xs text-gray-400 ml-auto">
@@ -192,8 +193,8 @@ export default function MeetingPage() {
       {/* List */}
       {groupedMinutes.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
-          <p className="text-lg mb-2">MTGがありません</p>
-          <p className="text-sm">「MTGを追加」から新しいMTGを作成してください</p>
+          <p className="text-lg mb-2">ミーティングがありません</p>
+          <p className="text-sm">「ミーティングを追加」から新しいミーティングを作成してください</p>
         </div>
       ) : (
         <div className="space-y-8">
@@ -528,7 +529,7 @@ function MeetingModal({
   }, [onClose]);
 
   const [date, setDate] = useState(initial?.date ?? getNextSaturday());
-  const [title, setTitle] = useState(initial?.title ?? "定例MTG");
+  const [title, setTitle] = useState(initial?.title ?? "定例ミーティング");
   const [startTime, setStartTime] = useState(initial?.startTime ?? "09:00");
   const [endTime, setEndTime] = useState(initial?.endTime ?? "12:00");
   const [location, setLocation] = useState<MeetingLocation>(initial?.location ?? "対面");
@@ -579,7 +580,7 @@ function MeetingModal({
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-            {initial ? "MTGを編集" : "新規MTG"}
+            {initial ? "ミーティングを編集" : "新規ミーティング"}
           </h3>
           <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
             <CloseIcon className="w-5 h-5" />
@@ -604,7 +605,7 @@ function MeetingModal({
                 type="text"
                 value={title}
                 onChange={e => setTitle(e.target.value)}
-                placeholder="定例MTG"
+                placeholder="定例ミーティング"
                 className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>

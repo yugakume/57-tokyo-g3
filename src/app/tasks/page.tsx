@@ -51,7 +51,7 @@ export default function TasksPage() {
   const { user, isLoading, isAdmin } = useAuth();
   const router = useRouter();
   const { tasks, addTask, updateTask, deleteTask, updateTaskStatus } = useTask();
-  const { staffProfiles } = useSchedule();
+  const { staffProfiles, staffRoles } = useSchedule();
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -249,6 +249,7 @@ export default function TasksPage() {
                       task={task}
                       staffNameMap={staffNameMap}
                       staffProfiles={staffProfiles}
+                      staffRoles={staffRoles}
                       onStatusChange={handleStatusChange}
                       onEdit={canEdit ? () => setEditingTask(task) : undefined}
                       isAdmin={isAdmin}
@@ -268,6 +269,7 @@ export default function TasksPage() {
         <TaskModal
           userEmail={user.email}
           staffProfiles={staffProfiles}
+          staffRoles={staffRoles}
           onSave={handleAdd}
           onClose={() => setShowAddModal(false)}
         />
@@ -278,6 +280,7 @@ export default function TasksPage() {
         <TaskModal
           userEmail={user.email}
           staffProfiles={staffProfiles}
+          staffRoles={staffRoles}
           initial={editingTask}
           onSave={handleUpdate}
           onClose={() => setEditingTask(null)}
@@ -326,6 +329,7 @@ function TaskCard({
   task,
   staffNameMap,
   staffProfiles,
+  staffRoles,
   onStatusChange,
   onEdit,
   isAdmin,
@@ -335,6 +339,7 @@ function TaskCard({
   task: Task;
   staffNameMap: Record<string, string>;
   staffProfiles: { email: string; lastName: string }[];
+  staffRoles: { id: string; name: string; order: number }[];
   onStatusChange: (id: string, status: TaskStatus, e?: React.MouseEvent) => void;
   onEdit?: () => void;
   isAdmin: boolean;
@@ -346,7 +351,8 @@ function TaskCard({
   const isOverdue = task.dueDate && task.dueDate < today && task.status !== "done";
   const emails = task.assigneeEmails || [];
   const isAllTask = emails.length === 1 && emails[0] === "all";
-  const isTeamTask = isAllTask || emails.length > 1;
+  const isRoleTask = emails.some(e => e.startsWith("role:"));
+  const isTeamTask = isAllTask || isRoleTask || emails.length > 1;
 
   // ステータス変更先の選択肢（現在のステータス以外）
   const nextStatuses = STATUS_COLUMNS.filter(c => c.key !== task.status);
@@ -386,6 +392,16 @@ function TaskCard({
           <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300">
             全体
           </span>
+        ) : isRoleTask ? (
+          emails.filter(e => e.startsWith("role:")).map(e => {
+            const roleId = e.replace("role:", "");
+            const role = staffRoles.find(r => r.id === roleId);
+            return (
+              <span key={e} className="px-2 py-0.5 text-xs rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300">
+                {role?.name || roleId}
+              </span>
+            );
+          })
         ) : emails.length > 1 ? (
           emails.map(e => (
             <span key={e} className="px-2 py-0.5 text-xs rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
@@ -480,6 +496,7 @@ function TaskCard({
 function TaskModal({
   userEmail,
   staffProfiles,
+  staffRoles,
   initial,
   onSave,
   onClose,
@@ -490,7 +507,8 @@ function TaskModal({
   onUpdateCompletionStatus,
 }: {
   userEmail: string;
-  staffProfiles: { email: string; lastName: string }[];
+  staffProfiles: { email: string; lastName: string; roleIds?: string[] }[];
+  staffRoles: { id: string; name: string; order: number }[];
   initial?: Task;
   onSave: (data: Omit<Task, "id" | "createdAt" | "updatedAt">) => void;
   onClose: () => void;
@@ -510,11 +528,12 @@ function TaskModal({
 
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [scopeType, setScopeType] = useState<"self" | "all" | "select">(() => {
+  const [scopeType, setScopeType] = useState<"self" | "all" | "select" | "role">(() => {
     if (!initial) return "self";
     const emails = initial.assigneeEmails || [];
     if (emails.length === 1 && emails[0] === "all") return "all";
     if (emails.length === 1 && emails[0] === userEmail) return "self";
+    if (emails.some(e => e.startsWith("role:"))) return "role";
     return "select";
   });
   const [selectedEmails, setSelectedEmails] = useState<string[]>(() => {
@@ -522,9 +541,14 @@ function TaskModal({
     const emails = initial.assigneeEmails || [];
     if (emails.length === 1 && emails[0] === "all") return [];
     if (emails.length === 1 && emails[0] === userEmail) return [];
+    if (emails.some(e => e.startsWith("role:"))) return [];
     return emails;
   });
-  const [priority, setPriority] = useState<TaskPriority>(initial?.priority ?? "medium");
+  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>(() => {
+    if (!initial) return [];
+    const emails = initial.assigneeEmails || [];
+    return emails.filter(e => e.startsWith("role:")).map(e => e.replace("role:", ""));
+  });
   const [status, setStatus] = useState<TaskStatus>(initial?.status ?? "todo");
   const [dueDate, setDueDate] = useState(initial?.dueDate ?? "");
   const [dueTime, setDueTime] = useState(initial?.dueTime ?? "");
@@ -536,6 +560,7 @@ function TaskModal({
 
   const getAssigneeEmails = (): string[] => {
     if (scopeType === "all") return ["all"];
+    if (scopeType === "role") return selectedRoleIds.length > 0 ? selectedRoleIds.map(id => `role:${id}`) : [userEmail];
     if (scopeType === "select") return selectedEmails.length > 0 ? selectedEmails : [userEmail];
     return [userEmail];
   };
@@ -554,7 +579,7 @@ function TaskModal({
       title: title.trim(),
       description: description.trim(),
       status,
-      priority,
+      priority: "medium",
       assigneeEmails,
       dueDate: dueDate || undefined,
       dueTime: dueTime || undefined,
@@ -562,6 +587,7 @@ function TaskModal({
       completionStatus: needsCompletion ? (initial?.completionStatus ?? {}) : undefined,
       createdBy: initial?.createdBy ?? userEmail,
     });
+    onClose();
   };
 
   const handleToggleCompletion = (email: string) => {
@@ -622,10 +648,11 @@ function TaskModal({
           {/* 対象 & 優先度 */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">対象</label>
-            <div className="flex gap-2 mb-2">
+            <div className="flex gap-2 mb-2 flex-wrap">
               {([
                 { key: "self", label: "自分" },
                 { key: "select", label: "メンバー指定" },
+                { key: "role", label: "ロール指定" },
                 { key: "all", label: "全体" },
               ] as const).map(opt => (
                 <button
@@ -661,26 +688,30 @@ function TaskModal({
                 })}
               </div>
             )}
+            {scopeType === "role" && (
+              <div className="border border-gray-200 dark:border-gray-600 rounded-lg max-h-36 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
+                {staffRoles.length === 0 ? (
+                  <p className="text-xs text-gray-400 px-3 py-2">ロールが登録されていません</p>
+                ) : (
+                  [...staffRoles].sort((a, b) => a.order - b.order).map(role => {
+                    const checked = selectedRoleIds.includes(role.id);
+                    return (
+                      <label key={role.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setSelectedRoleIds(prev => prev.includes(role.id) ? prev.filter(r => r !== role.id) : [...prev, role.id])}
+                          className="rounded border-gray-300"
+                        />
+                        <span className="text-sm text-gray-700 dark:text-gray-300">{role.name}</span>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">優先度</label>
-            <div className="flex gap-2">
-              {(["high", "medium", "low"] as TaskPriority[]).map(p => (
-                <button
-                  key={p}
-                  onClick={() => setPriority(p)}
-                  className={`flex-1 px-2 py-2 text-sm rounded-lg border transition-colors ${
-                    priority === p
-                      ? "border-blue-500 bg-blue-50 text-blue-700"
-                      : "border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
-                  }`}
-                >
-                  {PRIORITY_CONFIG[p].label}
-                </button>
-              ))}
-            </div>
-          </div>
 
           {/* 作成者表示 (編集時) */}
           {initial && (
@@ -692,80 +723,42 @@ function TaskModal({
             </div>
           )}
 
-          {/* Status */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ステータス</label>
-            <select
-              value={status === "in_progress" ? "todo" : status}
-              onChange={e => setStatus(e.target.value as TaskStatus)}
-              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="todo">未着手</option>
-              <option value="done">完了</option>
-            </select>
-          </div>
+          {/* Status (編集時のみ表示) */}
+          {initial && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ステータス</label>
+              <select
+                value={status === "in_progress" ? "todo" : status}
+                onChange={e => setStatus(e.target.value as TaskStatus)}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="todo">未着手</option>
+                <option value="done">完了</option>
+              </select>
+            </div>
+          )}
 
-          {/* Due Date - Quick select + manual */}
+          {/* Due Date - Mini Calendar */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">期限</label>
-            <div className="flex gap-1.5 mb-2 flex-wrap">
-              {(() => {
-                const today = new Date();
-                const fmt = (d: Date) => d.toISOString().split("T")[0];
-                const addDays = (n: number) => { const d = new Date(today); d.setDate(d.getDate() + n); return d; };
-                const nextDay = (dayOfWeek: number) => {
-                  const d = new Date(today);
-                  const diff = (dayOfWeek - d.getDay() + 7) % 7 || 7;
-                  d.setDate(d.getDate() + diff);
-                  return d;
-                };
-                const quickDates = [
-                  { label: "今日", date: fmt(today) },
-                  { label: "明日", date: fmt(addDays(1)) },
-                  { label: "明後日", date: fmt(addDays(2)) },
-                  { label: "今週金", date: fmt(nextDay(5)) },
-                  { label: "来週月", date: fmt(nextDay(1)) },
-                  { label: "来週土", date: fmt(nextDay(6)) },
-                ];
-                return quickDates.map(q => (
-                  <button
-                    key={q.label}
-                    type="button"
-                    onClick={() => { setDueDate(q.date); if (!dueTime) setDueTime("18:00"); }}
-                    className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
-                      dueDate === q.date
-                        ? "border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
-                        : "border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
-                    }`}
-                  >
-                    {q.label}
-                  </button>
-                ));
-              })()}
-              {dueDate && (
-                <button
-                  type="button"
-                  onClick={() => { setDueDate(""); setDueTime(""); }}
-                  className="px-2.5 py-1 text-xs rounded-full border border-red-200 text-red-500 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/30 transition-colors"
-                >
-                  クリア
-                </button>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                type="date"
-                value={dueDate}
-                onChange={e => setDueDate(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+            <MiniCalendar selectedDate={dueDate} onSelectDate={(d) => { setDueDate(d); if (!dueTime) setDueTime("18:00"); }} />
+            <div className="flex items-center gap-3 mt-2">
               <input
                 type="time"
                 value={dueTime}
                 onChange={e => setDueTime(e.target.value)}
                 placeholder="時間（任意）"
-                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="flex-1 px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              {dueDate && (
+                <button
+                  type="button"
+                  onClick={() => { setDueDate(""); setDueTime(""); }}
+                  className="px-3 py-2 text-xs border border-red-200 text-red-500 rounded-lg hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/30 transition-colors"
+                >
+                  クリア
+                </button>
+              )}
             </div>
             {dueDate && (
               <p className="text-xs text-gray-400 mt-1">
@@ -850,6 +843,121 @@ function TaskModal({
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================
+// ミニカレンダー（日付選択用）
+// =============================================
+
+function MiniCalendar({
+  selectedDate,
+  onSelectDate,
+}: {
+  selectedDate: string;
+  onSelectDate: (date: string) => void;
+}) {
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+  const [viewYear, setViewYear] = useState(() => {
+    if (selectedDate) return new Date(selectedDate + "T00:00:00").getFullYear();
+    return today.getFullYear();
+  });
+  const [viewMonth, setViewMonth] = useState(() => {
+    if (selectedDate) return new Date(selectedDate + "T00:00:00").getMonth();
+    return today.getMonth();
+  });
+
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay();
+  const prevMonthDays = new Date(viewYear, viewMonth, 0).getDate();
+
+  const goToPrevMonth = () => {
+    if (viewMonth === 0) { setViewYear(viewYear - 1); setViewMonth(11); }
+    else setViewMonth(viewMonth - 1);
+  };
+  const goToNextMonth = () => {
+    if (viewMonth === 11) { setViewYear(viewYear + 1); setViewMonth(0); }
+    else setViewMonth(viewMonth + 1);
+  };
+
+  const fmt = (y: number, m: number, d: number) =>
+    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+  const weekDays = ["日", "月", "火", "水", "木", "金", "土"];
+
+  // Build calendar grid cells
+  const cells: { date: string; day: number; isCurrentMonth: boolean }[] = [];
+  // Previous month overflow
+  for (let i = 0; i < firstDayOfWeek; i++) {
+    const d = prevMonthDays - firstDayOfWeek + 1 + i;
+    const m = viewMonth === 0 ? 11 : viewMonth - 1;
+    const y = viewMonth === 0 ? viewYear - 1 : viewYear;
+    cells.push({ date: fmt(y, m, d), day: d, isCurrentMonth: false });
+  }
+  // Current month
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push({ date: fmt(viewYear, viewMonth, d), day: d, isCurrentMonth: true });
+  }
+  // Next month overflow (fill to 42 cells = 6 rows)
+  const remaining = 42 - cells.length;
+  for (let d = 1; d <= remaining; d++) {
+    const m = viewMonth === 11 ? 0 : viewMonth + 1;
+    const y = viewMonth === 11 ? viewYear + 1 : viewYear;
+    cells.push({ date: fmt(y, m, d), day: d, isCurrentMonth: false });
+  }
+
+  return (
+    <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-3">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-2">
+        <button type="button" onClick={goToPrevMonth} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+        </button>
+        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+          {viewYear}年{viewMonth + 1}月
+        </span>
+        <button type="button" onClick={goToNextMonth} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+        </button>
+      </div>
+      {/* Weekday headers */}
+      <div className="grid grid-cols-7 mb-1">
+        {weekDays.map(wd => (
+          <div key={wd} className="text-center text-[10px] font-medium text-gray-400 dark:text-gray-500 py-1">
+            {wd}
+          </div>
+        ))}
+      </div>
+      {/* Date grid */}
+      <div className="grid grid-cols-7">
+        {cells.map((cell, i) => {
+          const isSelected = cell.date === selectedDate;
+          const isToday = cell.date === todayStr;
+          const isPast = cell.date < todayStr;
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={() => onSelectDate(cell.date)}
+              className={`aspect-square flex items-center justify-center text-xs rounded-md transition-colors ${
+                isSelected
+                  ? "bg-blue-600 text-white font-medium"
+                  : isToday
+                    ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium"
+                    : cell.isCurrentMonth
+                      ? isPast
+                        ? "text-gray-300 dark:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
+                        : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                      : "text-gray-300 dark:text-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"
+              }`}
+            >
+              {cell.day}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

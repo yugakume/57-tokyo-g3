@@ -51,6 +51,18 @@ export interface Announcement {
   content: string;
   date: string;
   pinned: boolean;
+  category?: string;
+  targetType?: "all" | "select" | "role";
+  targetEmails?: string[];
+  expiresAt?: string;
+  url?: string;
+  createdBy?: string;
+}
+
+export interface AnnouncementCategory {
+  id: string;
+  name: string;
+  order: number;
 }
 
 // =============================================

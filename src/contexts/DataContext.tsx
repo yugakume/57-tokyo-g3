@@ -3,13 +3,14 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import type { LinkItem, LinkCategory, AccountInfo, Announcement } from "@/types";
+import type { LinkItem, LinkCategory, AccountInfo, Announcement, AnnouncementCategory } from "@/types";
 
 interface DataContextType {
   links: LinkItem[];
   categories: LinkCategory[];
   accounts: AccountInfo[];
   announcements: Announcement[];
+  announcementCategories: AnnouncementCategory[];
   addLink: (link: Omit<LinkItem, "id" | "createdAt" | "updatedAt">) => Promise<void>;
   updateLink: (id: string, link: Partial<LinkItem>) => Promise<void>;
   deleteLink: (id: string) => Promise<void>;
@@ -22,6 +23,9 @@ interface DataContextType {
   addAnnouncement: (announcement: Omit<Announcement, "id">) => Promise<void>;
   updateAnnouncement: (id: string, announcement: Partial<Announcement>) => Promise<void>;
   deleteAnnouncement: (id: string) => Promise<void>;
+  addAnnouncementCategory: (category: Omit<AnnouncementCategory, "id">) => Promise<void>;
+  updateAnnouncementCategory: (id: string, category: Partial<AnnouncementCategory>) => Promise<void>;
+  deleteAnnouncementCategory: (id: string) => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -31,8 +35,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [categories, setCategories] = useState<LinkCategory[]>([]);
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [announcementCategories, setAnnouncementCategories] = useState<AnnouncementCategory[]>([]);
   const [loadedCount, setLoadedCount] = useState(0);
-  const loaded = loadedCount >= 4;
+  const loaded = loadedCount >= 5;
 
   // Firestore リアルタイム購読
   useEffect(() => {
@@ -63,6 +68,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
     unsubs.push(onSnapshot(collection(db, "announcements"), (snap) => {
       const data = snap.docs.map(d => ({ ...d.data(), id: d.id })) as Announcement[];
       setAnnouncements(data);
+      setLoadedCount(prev => prev + 1);
+    }));
+
+    // Announcement Categories
+    unsubs.push(onSnapshot(collection(db, "announcementCategories"), (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id })) as AnnouncementCategory[];
+      setAnnouncementCategories(data);
       setLoadedCount(prev => prev + 1);
     }));
 
@@ -127,13 +139,28 @@ export function DataProvider({ children }: { children: ReactNode }) {
     await deleteDoc(doc(db, "announcements", id));
   }, []);
 
+  // --- Announcement Categories ---
+  const addAnnouncementCategory = useCallback(async (category: Omit<AnnouncementCategory, "id">) => {
+    const id = `anncat-${Date.now()}`;
+    await setDoc(doc(db, "announcementCategories", id), { ...category, id });
+  }, []);
+
+  const updateAnnouncementCategory = useCallback(async (id: string, updates: Partial<AnnouncementCategory>) => {
+    await updateDoc(doc(db, "announcementCategories", id), updates);
+  }, []);
+
+  const deleteAnnouncementCategory = useCallback(async (id: string) => {
+    await deleteDoc(doc(db, "announcementCategories", id));
+  }, []);
+
   return (
     <DataContext.Provider value={{
-      links, categories, accounts, announcements,
+      links, categories, accounts, announcements, announcementCategories,
       addLink, updateLink, deleteLink,
       addCategory, updateCategory, deleteCategory,
       addAccount, updateAccount, deleteAccount,
       addAnnouncement, updateAnnouncement, deleteAnnouncement,
+      addAnnouncementCategory, updateAnnouncementCategory, deleteAnnouncementCategory,
     }}>
       {children}
     </DataContext.Provider>

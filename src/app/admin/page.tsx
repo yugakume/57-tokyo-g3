@@ -7,18 +7,19 @@ import { useData } from "@/contexts/DataContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
 import Toast from "@/components/Toast";
 import { LinkIcon, PlusIcon, TrashIcon, EditIcon, CloseIcon } from "@/components/Icons";
-import type { LinkItem, LinkIconType, AccountInfo, Announcement } from "@/types";
+import type { LinkItem, LinkIconType, AccountInfo, Announcement, AnnouncementCategory } from "@/types";
 
-type Tab = "links" | "categories" | "accounts" | "users" | "roles" | "announcements";
+type Tab = "links" | "categories" | "accounts" | "users" | "roles" | "announcements" | "announcementCategories";
 
 export default function AdminPage() {
   const { user, isLoading, isAdmin, allowedEmails, adminEmails, addAllowedEmail, removeAllowedEmail, addAdminEmail, removeAdminEmail } = useAuth();
   const {
-    links, categories, accounts, announcements,
+    links, categories, accounts, announcements, announcementCategories,
     addLink, updateLink, deleteLink,
     addCategory, updateCategory, deleteCategory,
     addAccount, updateAccount, deleteAccount,
     addAnnouncement, updateAnnouncement, deleteAnnouncement,
+    addAnnouncementCategory, updateAnnouncementCategory, deleteAnnouncementCategory,
   } = useData();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("links");
@@ -42,14 +43,23 @@ export default function AdminPage() {
   // Announcement form state
   const [showAnnForm, setShowAnnForm] = useState(false);
   const [editingAnn, setEditingAnn] = useState<Announcement | null>(null);
-  const [annForm, setAnnForm] = useState({ title: "", content: "", date: new Date().toISOString().split("T")[0], pinned: false });
+  const [annForm, setAnnForm] = useState({
+    title: "", content: "", date: new Date().toISOString().split("T")[0], pinned: false,
+    category: "" as string, targetType: "all" as "all" | "select" | "role",
+    targetEmails: [] as string[], expiresAt: "" as string, url: "" as string, createdBy: "" as string,
+  });
+
+  // Announcement category management
+  const [newAnnCatName, setNewAnnCatName] = useState("");
+  const [editingAnnCatId, setEditingAnnCatId] = useState<string | null>(null);
+  const [editingAnnCatName, setEditingAnnCatName] = useState("");
 
   // User management state
   const [newEmail, setNewEmail] = useState("");
   const [newAdminEmail, setNewAdminEmail] = useState("");
 
   // Role management
-  const { staffRoles, addStaffRole, updateStaffRole, deleteStaffRole, staffProfiles, addStaffProfile, deleteStaffProfile } = useSchedule();
+  const { staffRoles, addStaffRole, updateStaffRole, deleteStaffRole, staffProfiles, addStaffProfile, updateStaffProfile, deleteStaffProfile } = useSchedule();
   const [newRoleName, setNewRoleName] = useState("");
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
   const [editingRoleName, setEditingRoleName] = useState("");
@@ -231,21 +241,39 @@ export default function AdminPage() {
   const openAnnForm = (ann?: Announcement) => {
     if (ann) {
       setEditingAnn(ann);
-      setAnnForm({ title: ann.title, content: ann.content, date: ann.date, pinned: ann.pinned });
+      setAnnForm({
+        title: ann.title, content: ann.content, date: ann.date, pinned: ann.pinned,
+        category: ann.category || "", targetType: ann.targetType || "all",
+        targetEmails: ann.targetEmails || [], expiresAt: ann.expiresAt || "",
+        url: ann.url || "", createdBy: ann.createdBy || "",
+      });
     } else {
       setEditingAnn(null);
-      setAnnForm({ title: "", content: "", date: new Date().toISOString().split("T")[0], pinned: false });
+      setAnnForm({
+        title: "", content: "", date: new Date().toISOString().split("T")[0], pinned: false,
+        category: "", targetType: "all", targetEmails: [], expiresAt: "", url: "",
+        createdBy: user?.email || "",
+      });
     }
     setShowAnnForm(true);
   };
 
   const saveAnnForm = () => {
     if (!annForm.title) return;
+    const data = {
+      ...annForm,
+      category: annForm.category || undefined,
+      targetType: annForm.targetType || undefined,
+      targetEmails: annForm.targetEmails.length > 0 ? annForm.targetEmails : undefined,
+      expiresAt: annForm.expiresAt || undefined,
+      url: annForm.url || undefined,
+      createdBy: annForm.createdBy || user?.email || undefined,
+    };
     if (editingAnn) {
-      updateAnnouncement(editingAnn.id, annForm);
+      updateAnnouncement(editingAnn.id, data);
       setToast("お知らせを更新しました");
     } else {
-      addAnnouncement(annForm);
+      addAnnouncement(data);
       setToast("お知らせを追加しました");
     }
     setShowAnnForm(false);
@@ -263,6 +291,7 @@ export default function AdminPage() {
     { id: "categories", label: "カテゴリ管理" },
     { id: "accounts", label: "アカウント管理" },
     { id: "announcements", label: "お知らせ管理" },
+    { id: "announcementCategories", label: "お知らせカテゴリ" },
     { id: "users", label: "ユーザー管理" },
     { id: "roles", label: "ロール管理" },
   ];
@@ -552,6 +581,69 @@ export default function AdminPage() {
               </div>
             </div>
 
+            {/* メンバーロール管理 */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">メンバーロール管理</h3>
+              <p className="text-xs text-gray-500 mb-3">
+                各メンバーにロールを割り当てます。1人に複数のロールを設定できます。
+              </p>
+              {staffProfiles.length > 0 ? (
+                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-700">
+                  {[...staffProfiles].sort((a, b) => (a.fullName || a.lastName).localeCompare(b.fullName || b.lastName)).map(profile => {
+                    const displayName = profile.fullName || profile.lastName || profile.email;
+                    return (
+                      <div key={profile.id} className="px-4 py-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center shrink-0">
+                            <span className="text-blue-700 dark:text-blue-300 text-xs font-medium">
+                              {displayName.charAt(0).toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{displayName}</p>
+                            <p className="text-xs text-gray-400 truncate">{profile.email}</p>
+                          </div>
+                        </div>
+                        {staffRoles.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5 ml-10">
+                            {[...staffRoles].sort((a, b) => a.order - b.order).map(role => {
+                              const hasRole = (profile.roleIds ?? []).includes(role.id);
+                              return (
+                                <button
+                                  key={role.id}
+                                  onClick={() => {
+                                    const currentRoles = profile.roleIds ?? [];
+                                    const newRoles = hasRole
+                                      ? currentRoles.filter(r => r !== role.id)
+                                      : [...currentRoles, role.id];
+                                    updateStaffProfile(profile.id, { roleIds: newRoles });
+                                    setToast(`${displayName}のロールを更新しました`);
+                                  }}
+                                  className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                                    hasRole
+                                      ? "bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-600"
+                                      : "bg-gray-50 dark:bg-gray-700 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600"
+                                  }`}
+                                >
+                                  {hasRole ? "✓ " : ""}{role.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-gray-400 ml-10">ロールが未登録です。「ロール管理」タブから追加してください。</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-6 text-center">
+                  <p className="text-sm text-gray-400">メンバーが登録されていません</p>
+                </div>
+              )}
+            </div>
+
             {/* セキュリティ情報 */}
             <div className="bg-gray-50 rounded-xl border border-gray-200 p-4">
               <h3 className="text-xs font-semibold text-gray-700 mb-2">セキュリティについて</h3>
@@ -687,6 +779,121 @@ export default function AdminPage() {
             </div>
           </div>
         )}
+
+        {/* Announcement Categories tab */}
+        {activeTab === "announcementCategories" && (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">お知らせカテゴリ一覧</h3>
+              <p className="text-xs text-gray-500 mb-3">お知らせに設定するカテゴリを管理します。</p>
+
+              {announcementCategories.length > 0 ? (
+                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-700">
+                  {[...announcementCategories].sort((a, b) => a.order - b.order).map(cat => (
+                    <div key={cat.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 dark:hover:bg-gray-700/50">
+                      {editingAnnCatId === cat.id ? (
+                        <>
+                          <input
+                            type="text"
+                            value={editingAnnCatName}
+                            onChange={e => setEditingAnnCatName(e.target.value)}
+                            className="flex-1 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            autoFocus
+                            onKeyDown={e => {
+                              if (e.key === "Enter" && editingAnnCatName.trim()) {
+                                updateAnnouncementCategory(cat.id, { name: editingAnnCatName.trim() });
+                                setEditingAnnCatId(null);
+                                setToast("カテゴリを更新しました");
+                              }
+                              if (e.key === "Escape") setEditingAnnCatId(null);
+                            }}
+                          />
+                          <button
+                            onClick={() => {
+                              if (editingAnnCatName.trim()) {
+                                updateAnnouncementCategory(cat.id, { name: editingAnnCatName.trim() });
+                                setEditingAnnCatId(null);
+                                setToast("カテゴリを更新しました");
+                              }
+                            }}
+                            className="p-1.5 text-green-600 hover:bg-green-50 rounded transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="20,6 9,17 4,12" strokeWidth="2" /></svg>
+                          </button>
+                          <button
+                            onClick={() => setEditingAnnCatId(null)}
+                            className="p-1.5 text-gray-400 hover:bg-gray-100 rounded transition-colors"
+                          >
+                            <CloseIcon className="w-4 h-4" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-gray-900 dark:text-gray-100">{cat.name}</p>
+                          </div>
+                          <span className="text-xs text-gray-300 dark:text-gray-600 shrink-0">#{cat.order}</span>
+                          <div className="flex gap-1 shrink-0">
+                            <button
+                              onClick={() => { setEditingAnnCatId(cat.id); setEditingAnnCatName(cat.name); }}
+                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                            >
+                              <EditIcon />
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (confirm(`「${cat.name}」を削除しますか？`)) {
+                                  deleteAnnouncementCategory(cat.id);
+                                  setToast("カテゴリを削除しました");
+                                }
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            >
+                              <TrashIcon />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-6 text-center">
+                  <p className="text-sm text-gray-400 dark:text-gray-500">カテゴリがありません</p>
+                </div>
+              )}
+
+              <div className="flex gap-2 mt-3">
+                <input
+                  type="text"
+                  value={newAnnCatName}
+                  onChange={e => setNewAnnCatName(e.target.value)}
+                  placeholder="例: 重要連絡"
+                  className="flex-1 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && newAnnCatName.trim()) {
+                      addAnnouncementCategory({ name: newAnnCatName.trim(), order: announcementCategories.length + 1 });
+                      setNewAnnCatName("");
+                      setToast("カテゴリを追加しました");
+                    }
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    if (newAnnCatName.trim()) {
+                      addAnnouncementCategory({ name: newAnnCatName.trim(), order: announcementCategories.length + 1 });
+                      setNewAnnCatName("");
+                      setToast("カテゴリを追加しました");
+                    }
+                  }}
+                  className="flex items-center gap-1.5 bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shrink-0"
+                >
+                  <PlusIcon className="w-4 h-4" /> 追加
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Link Modal */}
@@ -754,12 +961,77 @@ export default function AdminPage() {
             <FormField label="内容">
               <textarea value={annForm.content} onChange={e => setAnnForm(f => ({ ...f, content: e.target.value }))} className="form-input" rows={4} placeholder="お知らせの内容" style={{ resize: "vertical" }} />
             </FormField>
+            <FormField label="カテゴリ">
+              <select value={annForm.category} onChange={e => setAnnForm(f => ({ ...f, category: e.target.value }))} className="form-input">
+                <option value="">カテゴリなし</option>
+                {[...announcementCategories].sort((a, b) => a.order - b.order).map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </FormField>
             <FormField label="日付">
               <input type="date" value={annForm.date} onChange={e => setAnnForm(f => ({ ...f, date: e.target.value }))} className="form-input" />
             </FormField>
+            <FormField label="掲載終了日">
+              <input type="date" value={annForm.expiresAt} onChange={e => setAnnForm(f => ({ ...f, expiresAt: e.target.value }))} className="form-input" />
+            </FormField>
+            <FormField label="関連リンク">
+              <input value={annForm.url} onChange={e => setAnnForm(f => ({ ...f, url: e.target.value }))} className="form-input" placeholder="https://..." />
+            </FormField>
+            <FormField label="対象">
+              <select value={annForm.targetType} onChange={e => setAnnForm(f => ({ ...f, targetType: e.target.value as "all" | "select" | "role" }))} className="form-input">
+                <option value="all">全体</option>
+                <option value="select">個人指定</option>
+                <option value="role">ロール指定</option>
+              </select>
+            </FormField>
+            {annForm.targetType === "select" && (
+              <FormField label="対象メールアドレス（カンマ区切り）">
+                <input
+                  value={annForm.targetEmails.join(", ")}
+                  onChange={e => setAnnForm(f => ({ ...f, targetEmails: e.target.value.split(",").map(s => s.trim()).filter(Boolean) }))}
+                  className="form-input"
+                  placeholder="user1@example.com, user2@example.com"
+                />
+              </FormField>
+            )}
+            {annForm.targetType === "role" && (
+              <FormField label="対象ロール">
+                <div className="flex flex-wrap gap-2">
+                  {staffRoles.map(role => {
+                    const roleKey = `role:${role.id}`;
+                    const isSelected = annForm.targetEmails.includes(roleKey);
+                    return (
+                      <button
+                        key={role.id}
+                        type="button"
+                        onClick={() => {
+                          setAnnForm(f => ({
+                            ...f,
+                            targetEmails: isSelected
+                              ? f.targetEmails.filter(e => e !== roleKey)
+                              : [...f.targetEmails, roleKey],
+                          }));
+                        }}
+                        className={`px-3 py-1 text-xs rounded-lg border transition-colors ${
+                          isSelected
+                            ? "bg-blue-600 text-white border-blue-600"
+                            : "bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+                        }`}
+                      >
+                        {role.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </FormField>
+            )}
+            <FormField label="作成者メール">
+              <input value={annForm.createdBy} onChange={e => setAnnForm(f => ({ ...f, createdBy: e.target.value }))} className="form-input" placeholder="自動入力" />
+            </FormField>
             <div className="flex items-center gap-2">
               <input type="checkbox" id="ann-pinned" checked={annForm.pinned} onChange={e => setAnnForm(f => ({ ...f, pinned: e.target.checked }))} className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-              <label htmlFor="ann-pinned" className="text-sm text-gray-700">ピン留めする（常に上部に表示）</label>
+              <label htmlFor="ann-pinned" className="text-sm text-gray-700 dark:text-gray-300">ピン留めする（常に上部に表示）</label>
             </div>
             <div className="flex gap-2 pt-2">
               <button onClick={() => setShowAnnForm(false)} className="flex-1 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">キャンセル</button>
