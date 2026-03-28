@@ -57,7 +57,7 @@ const STATUS_COLORS: Record<string, string> = {
 // =============================================
 
 export default function SchedulePage() {
-  const { user, isLoading, calendarAccessToken, requestCalendarAccess, isDemoMode } = useAuth();
+  const { user, isLoading, calendarAccounts, calendarAccessToken, requestCalendarAccess, removeCalendarAccount, isDemoMode } = useAuth();
   const {
     staffProfiles, timeSlots, bookings, staffRoles,
     addStaffProfile, updateStaffProfile,
@@ -125,8 +125,8 @@ export default function SchedulePage() {
           addTimeSlots={addTimeSlots}
           deleteTimeSlot={deleteTimeSlot}
           setToast={setToast}
+          calendarAccounts={calendarAccounts}
           calendarAccessToken={calendarAccessToken}
-          requestCalendarAccess={requestCalendarAccess}
           isDemoMode={isDemoMode}
         />
       )}
@@ -154,8 +154,9 @@ export default function SchedulePage() {
           addStaffProfile={addStaffProfile}
           updateStaffProfile={updateStaffProfile}
           setToast={setToast}
-          calendarAccessToken={calendarAccessToken}
+          calendarAccounts={calendarAccounts}
           requestCalendarAccess={requestCalendarAccess}
+          removeCalendarAccount={removeCalendarAccount}
           isDemoMode={isDemoMode}
         />
       )}
@@ -199,8 +200,8 @@ function SlotsTab({
   addTimeSlots,
   deleteTimeSlot,
   setToast,
+  calendarAccounts,
   calendarAccessToken,
-  requestCalendarAccess,
   isDemoMode,
 }: {
   myProfile: StaffProfile | undefined;
@@ -211,8 +212,8 @@ function SlotsTab({
   addTimeSlots: (slots: Omit<TimeSlot, "id">[]) => void;
   deleteTimeSlot: (id: string) => void;
   setToast: (msg: string) => void;
+  calendarAccounts: import("@/contexts/AuthContext").CalendarAccount[];
   calendarAccessToken: string | null;
-  requestCalendarAccess: () => void;
   isDemoMode: boolean;
 }) {
   type ViewMode = "day" | "week" | "2week" | "month";
@@ -288,9 +289,9 @@ function SlotsTab({
   // For backward compat with existing code that references weekDates
   const weekDates = viewMode === "week" || viewMode === "day" || viewMode === "2week" ? viewDates : viewDates.slice(0, 7);
 
-  // Googleカレンダーのイベントを取得
+  // Googleカレンダーのイベントを全連携アカウントから取得
   useEffect(() => {
-    if (!calendarAccessToken || weekDates.length === 0) {
+    if (calendarAccounts.length === 0 || weekDates.length === 0) {
       setCalendarEvents([]);
       return;
     }
@@ -298,21 +299,27 @@ function SlotsTab({
     setCalendarLoading(true);
     const timeMin = new Date(weekDates[0] + "T00:00:00").toISOString();
     const timeMax = new Date(weekDates[6] + "T23:59:59").toISOString();
-    fetchCalendarEvents(calendarAccessToken, timeMin, timeMax)
-      .then(events => {
-        if (!cancelled) setCalendarEvents(events);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCalendarEvents([]);
-          setToast("Googleカレンダーの取得に失敗しました。再度連携してください。");
+    // 全アカウントの予定を並列取得してマージ
+    Promise.allSettled(
+      calendarAccounts.map(acc => fetchCalendarEvents(acc.accessToken, timeMin, timeMax))
+    ).then(results => {
+      if (cancelled) return;
+      const merged: CalendarEvent[] = [];
+      const seen = new Set<string>();
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          for (const ev of r.value) {
+            const key = `${ev.title}_${ev.start}_${ev.end}`;
+            if (!seen.has(key)) { seen.add(key); merged.push(ev); }
+          }
         }
-      })
-      .finally(() => {
-        if (!cancelled) setCalendarLoading(false);
-      });
+      }
+      setCalendarEvents(merged);
+    }).finally(() => {
+      if (!cancelled) setCalendarLoading(false);
+    });
     return () => { cancelled = true; };
-  }, [calendarAccessToken, weekDates, setToast]);
+  }, [calendarAccounts, weekDates, setToast]);
 
   // カレンダーイベントを日付+時間インデックスでマッピング
   const gcalBlocksByDate = useMemo(() => {
@@ -577,10 +584,10 @@ function SlotsTab({
             </select>
           </div>
           {/* Google Calendar status */}
-          {calendarAccessToken && (
+          {calendarAccounts.length > 0 && (
             <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
               <CalendarIcon className="w-3.5 h-3.5" />
-              Googleカレンダー連携中
+              Googleカレンダー {calendarAccounts.length}件連携中
               {calendarLoading && <span className="w-3 h-3 border border-green-400 border-t-transparent rounded-full animate-spin inline-block" />}
             </span>
           )}
@@ -1635,8 +1642,9 @@ function ProfileTab({
   addStaffProfile,
   updateStaffProfile,
   setToast,
-  calendarAccessToken,
+  calendarAccounts,
   requestCalendarAccess,
+  removeCalendarAccount,
   isDemoMode,
 }: {
   myProfile: StaffProfile | undefined;
@@ -1645,8 +1653,9 @@ function ProfileTab({
   addStaffProfile: (profile: Omit<StaffProfile, "id">) => void;
   updateStaffProfile: (id: string, profile: Partial<StaffProfile>) => void;
   setToast: (msg: string) => void;
-  calendarAccessToken: string | null;
+  calendarAccounts: import("@/contexts/AuthContext").CalendarAccount[];
   requestCalendarAccess: () => void;
+  removeCalendarAccount: (googleEmail: string) => void;
   isDemoMode: boolean;
 }) {
   const [lastName, setLastName] = useState(myProfile?.lastName ?? "");
@@ -1864,35 +1873,65 @@ function ProfileTab({
 
       {/* Google Calendar 連携セクション */}
       <div className="mt-5 pt-5 border-t border-gray-100 dark:border-gray-700">
-        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
-          <CalendarIcon className="w-4 h-4 text-gray-500" />
-          Googleカレンダー連携
-        </h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+            <CalendarIcon className="w-4 h-4 text-gray-500" />
+            Googleカレンダー連携
+            {calendarAccounts.length > 0 && (
+              <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5">{calendarAccounts.length}件</span>
+            )}
+          </h3>
+          {!isDemoMode && (
+            <button
+              onClick={requestCalendarAccess}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              + アカウントを追加
+            </button>
+          )}
+        </div>
+
         {isDemoMode ? (
           <p className="text-xs text-gray-400">デモモードでは連携できません</p>
-        ) : calendarAccessToken ? (
-          <div className="flex items-center gap-2 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700 rounded-xl px-4 py-3">
-            <span className="w-2.5 h-2.5 bg-green-500 rounded-full shrink-0" />
-            <div>
-              <p className="text-sm font-medium text-green-700 dark:text-green-300">連携中</p>
-              <p className="text-xs text-green-600 dark:text-green-400">空き日程カレンダーにGoogleカレンダーの予定が表示されます。予約確定・手動登録時にMeetリンクが自動発行されます。</p>
-            </div>
-          </div>
-        ) : (
+        ) : calendarAccounts.length === 0 ? (
           <div className="space-y-3">
             <p className="text-xs text-gray-500 dark:text-gray-400">連携すると以下の機能が使えます：</p>
             <ul className="text-xs text-gray-500 dark:text-gray-400 space-y-1 ml-3 list-disc">
-              <li>空き日程カレンダーにGoogleカレンダーの予定を表示</li>
+              <li>空き日程カレンダーにGoogleカレンダーの予定を表示（複数アカウント対応）</li>
               <li>予約確定・手動登録時にGoogle Meetリンクを自動発行</li>
+              <li>ページを再読み込みしても連携が持続する</li>
             </ul>
-            <button
-              onClick={requestCalendarAccess}
-              className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-500 text-gray-700 dark:text-gray-300 text-sm rounded-xl hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors shadow-sm"
-            >
-              <CalendarIcon className="w-4 h-4" />
-              Googleアカウントで連携する
-            </button>
-            <p className="text-xs text-gray-400">※ 連携はブラウザセッション中のみ有効です。再ログイン後は再連携が必要です。</p>
+            <p className="text-xs text-gray-400 bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
+              右上の「アカウントを追加」ボタンからGoogleアカウントで連携してください。
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {calendarAccounts.map(acc => (
+              <div key={acc.googleEmail} className="flex items-center justify-between bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl px-4 py-2.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-2 h-2 bg-green-500 rounded-full shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-green-800 dark:text-green-200 truncate">{acc.googleEmail}</p>
+                    <p className="text-xs text-green-600 dark:text-green-400">
+                      自動更新中 · トークン有効期限: {new Date(acc.expiresAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    if (confirm(`${acc.googleEmail} の連携を解除しますか？`)) {
+                      removeCalendarAccount(acc.googleEmail);
+                      setToast(`${acc.googleEmail} の連携を解除しました`);
+                    }
+                  }}
+                  className="ml-3 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded-lg transition-colors shrink-0"
+                >
+                  解除
+                </button>
+              </div>
+            ))}
+            <p className="text-xs text-gray-400 pt-1">複数のGoogleアカウントを追加できます。予定はすべてまとめてカレンダーに表示されます。</p>
           </div>
         )}
       </div>
