@@ -27,5 +27,8 @@ service cloud.firestore {
     match /settings/{id} {
       allow read: if true;
     }
+    match /emailSettings/{id} {
+      allow read: if true;
+    }
   }
 }

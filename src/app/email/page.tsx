@@ -9,6 +9,8 @@ import { EVENT_TYPE_LABELS } from "@/types";
 import type { Booking, TimeSlot, StaffProfile, Task } from "@/types";
 import { MailIcon } from "@/components/Icons";
 import Toast from "@/components/Toast";
+import { db } from "@/lib/firebase";
+import { doc, setDoc, getDoc } from "firebase/firestore";
 
 // =============================================
 // Types
@@ -216,11 +218,28 @@ export default function EmailPage() {
   const [sentLog, setSentLog] = useState<SentLogEntry[]>([]);
   const [toast, setToast] = useState("");
 
-  // Load from localStorage on mount
+  // Load settings: Firestore first (authoritative), fall back to localStorage
   useEffect(() => {
-    setSettings(loadSettings());
     setSentLog(loadSentLog());
-  }, []);
+    if (!user) {
+      setSettings(loadSettings());
+      return;
+    }
+    // Try Firestore
+    getDoc(doc(db, "emailSettings", user.email))
+      .then(snap => {
+        if (snap.exists()) {
+          const data = { ...DEFAULT_SETTINGS, ...snap.data() } as EmailSettings;
+          setSettings(data);
+          saveSettings(data); // sync to localStorage
+        } else {
+          setSettings(loadSettings());
+        }
+      })
+      .catch(() => {
+        setSettings(loadSettings());
+      });
+  }, [user?.email]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-send on mount when Gmail is connected
   const runAutoSend = useCallback(async () => {
@@ -280,9 +299,17 @@ export default function EmailPage() {
     return checkDueReminders(settings, bookings, timeSlots, staffProfiles, tasks, user.email, sentLog);
   }, [settings, bookings, timeSlots, staffProfiles, tasks, user, sentLog]);
 
-  const handleSaveSettings = (newSettings: EmailSettings) => {
+  const handleSaveSettings = async (newSettings: EmailSettings) => {
     setSettings(newSettings);
     saveSettings(newSettings);
+    // Persist to Firestore so GAS can read per-user settings
+    if (user) {
+      try {
+        await setDoc(doc(db, "emailSettings", user.email), newSettings);
+      } catch {
+        // Firestore save failed — localStorage copy is still available
+      }
+    }
     setToast("設定を保存しました");
   };
 
