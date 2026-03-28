@@ -63,6 +63,7 @@ export default function MeetingPage() {
 
   const [filterMonth, setFilterMonth] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [hidePast, setHidePast] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingMinutes, setEditingMinutes] = useState<MeetingMinutes | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -83,9 +84,14 @@ export default function MeetingPage() {
     return Array.from(months).sort().reverse();
   }, [minutes]);
 
+  const today = useMemo(() => new Date().toISOString().split("T")[0], []);
+
   // フィルタ済みMTG
   const filteredMinutes = useMemo(() => {
     let list = [...minutes];
+    if (hidePast) {
+      list = list.filter(m => (m.date ?? "") >= today);
+    }
     if (filterMonth !== "all") {
       list = list.filter(m => m.date?.startsWith(filterMonth));
     }
@@ -98,10 +104,11 @@ export default function MeetingPage() {
         (m.agenda ?? []).some(a => a.topic.toLowerCase().includes(q) || (a.roleName ?? "").toLowerCase().includes(q) || (a.personName ?? "").toLowerCase().includes(q))
       );
     }
-    return list.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
-  }, [minutes, filterMonth, searchQuery]);
+    // 近い日程が上（昇順）
+    return list.sort((a, b) => (a.date ?? "").localeCompare(b.date ?? ""));
+  }, [minutes, hidePast, filterMonth, searchQuery, today]);
 
-  // 月ごとグループ化
+  // 月ごとグループ化（近い月が上）
   const groupedMinutes = useMemo(() => {
     const groups: Record<string, MeetingMinutes[]> = {};
     filteredMinutes.forEach(m => {
@@ -110,7 +117,7 @@ export default function MeetingPage() {
       if (!groups[ym]) groups[ym] = [];
       groups[ym].push(m);
     });
-    return Object.entries(groups).sort(([a], [b]) => b.localeCompare(a));
+    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
   }, [filteredMinutes]);
 
   const showToast = (msg: string) => {
@@ -174,6 +181,16 @@ export default function MeetingPage() {
             <option key={ym} value={ym}>{formatMonthLabel(ym)}</option>
           ))}
         </select>
+        <button
+          onClick={() => setHidePast(v => !v)}
+          className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
+            hidePast
+              ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
+              : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+          }`}
+        >
+          {hidePast ? "過去を非表示中" : "過去も表示中"}
+        </button>
         <div className="relative w-full sm:w-64">
           <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
