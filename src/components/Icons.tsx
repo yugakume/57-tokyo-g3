@@ -90,7 +90,7 @@ export function ChevronIcon({ direction = "right", className = "w-4 h-4" }: { di
   };
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <polyline points={paths[direction]} />
+      <path d={paths[direction]} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

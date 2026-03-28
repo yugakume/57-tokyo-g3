@@ -120,14 +120,12 @@ export default function MeetingPage() {
 
   const handleAdd = (data: Omit<MeetingMinutes, "id" | "createdAt" | "updatedAt">) => {
     addMinutes(data);
-    setShowAddModal(false);
     showToast("ミーティングを追加しました");
   };
 
   const handleUpdate = (data: Omit<MeetingMinutes, "id" | "createdAt" | "updatedAt">) => {
     if (!editingMinutes) return;
     updateMinutes(editingMinutes.id, data);
-    setEditingMinutes(null);
     showToast("ミーティングを更新しました");
   };
 
@@ -617,6 +615,8 @@ function MeetingModal({
 
   const handleSubmit = () => {
     if (!date || !title.trim()) return;
+    // Close modal first so Firestore onSnapshot callbacks cannot interfere
+    onClose();
     onSave({
       date,
       title: title.trim(),
@@ -630,7 +630,6 @@ function MeetingModal({
       content,
       createdBy: initial?.createdBy ?? userEmail,
     });
-    onClose();
   };
 
   return (
