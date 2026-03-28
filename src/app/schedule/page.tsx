@@ -10,7 +10,7 @@ import { TrashIcon, EditIcon, CheckIcon, CalendarIcon, CloseIcon, CopyIcon, Exte
 import Toast from "@/components/Toast";
 import { fetchCalendarEvents, type CalendarEvent } from "@/lib/googleCalendar";
 
-type Tab = "slots" | "bookings";
+type Tab = "slots" | "bookings" | "profile";
 
 // =============================================
 // ユーティリティ
@@ -62,7 +62,7 @@ export default function SchedulePage() {
     staffProfiles, timeSlots, bookings, staffRoles,
     addStaffProfile, updateStaffProfile,
     addTimeSlot, addTimeSlots, deleteTimeSlot,
-    confirmBooking, cancelBooking,
+    confirmBooking, cancelBooking, createManualBooking,
   } = useSchedule();
   const router = useRouter();
 
@@ -88,6 +88,7 @@ export default function SchedulePage() {
   const tabs: { id: Tab; label: string }[] = [
     { id: "slots", label: "空き日程" },
     { id: "bookings", label: "予約管理" },
+    { id: "profile", label: "スタッフ設定" },
   ];
 
   return (
@@ -138,9 +139,24 @@ export default function SchedulePage() {
           myProfile={myProfile}
           confirmBooking={confirmBooking}
           cancelBooking={cancelBooking}
+          createManualBooking={createManualBooking}
+          setToast={setToast}
+          calendarAccessToken={calendarAccessToken}
+          isDemoMode={isDemoMode}
+        />
+      )}
+
+      {activeTab === "profile" && (
+        <ProfileTab
+          myProfile={myProfile}
+          userEmail={user.email}
+          staffRoles={staffRoles}
+          addStaffProfile={addStaffProfile}
+          updateStaffProfile={updateStaffProfile}
           setToast={setToast}
           calendarAccessToken={calendarAccessToken}
           requestCalendarAccess={requestCalendarAccess}
+          isDemoMode={isDemoMode}
         />
       )}
 
@@ -560,19 +576,11 @@ function SlotsTab({
               ))}
             </select>
           </div>
-          {/* Google Calendar connect */}
-          {!isDemoMode && !calendarAccessToken && (
-            <button
-              onClick={requestCalendarAccess}
-              className="flex items-center gap-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-xs px-2.5 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
-              <CalendarIcon className="w-3.5 h-3.5" /> Googleカレンダー連携
-            </button>
-          )}
+          {/* Google Calendar status */}
           {calendarAccessToken && (
             <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
               <CalendarIcon className="w-3.5 h-3.5" />
-              連携中
+              Googleカレンダー連携中
               {calendarLoading && <span className="w-3 h-3 border border-green-400 border-t-transparent rounded-full animate-spin inline-block" />}
             </span>
           )}
@@ -1056,6 +1064,13 @@ async function createGoogleMeetEvent(
   } catch { return null; }
 }
 
+// 30分刻み時刻選択肢（手動予約用）
+const TIME_OPTIONS: string[] = [];
+for (let h = 0; h <= 23; h++) {
+  TIME_OPTIONS.push(`${String(h).padStart(2, "0")}:00`);
+  TIME_OPTIONS.push(`${String(h).padStart(2, "0")}:30`);
+}
+
 function BookingsTab({
   bookings,
   timeSlots,
@@ -1063,9 +1078,10 @@ function BookingsTab({
   myProfile,
   confirmBooking,
   cancelBooking,
+  createManualBooking,
   setToast,
   calendarAccessToken,
-  requestCalendarAccess,
+  isDemoMode,
 }: {
   bookings: Booking[];
   timeSlots: TimeSlot[];
@@ -1073,13 +1089,90 @@ function BookingsTab({
   myProfile: StaffProfile | undefined;
   confirmBooking: (bookingId: string, slotId: string, staffId: string, meetLink?: string) => void;
   cancelBooking: (bookingId: string) => void;
+  createManualBooking: (params: {
+    staffId: string; date: string; startTime: string; endTime: string;
+    eventType: EventType; customEventName?: string; studentName: string;
+    studentEmail?: string; meetLink?: string;
+  }) => void;
   setToast: (msg: string) => void;
   calendarAccessToken: string | null;
-  requestCalendarAccess: () => void;
+  isDemoMode: boolean;
 }) {
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "confirmed" | "cancelled">("all");
   const [confirmingBookingId, setConfirmingBookingId] = useState<string | null>(null);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
+
+  // 手動予約モーダル
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [manualEventType, setManualEventType] = useState<EventType>("orientation");
+  const [manualCustomName, setManualCustomName] = useState("");
+  const [manualStaffId, setManualStaffId] = useState(myProfile?.id ?? "");
+  const [manualStudentName, setManualStudentName] = useState("");
+  const [manualStudentEmail, setManualStudentEmail] = useState("");
+  const [manualDate, setManualDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [manualStartTime, setManualStartTime] = useState("10:00");
+  const [manualSubmitting, setManualSubmitting] = useState(false);
+
+  const manualEndTime = useMemo(() => {
+    const [h, m] = manualStartTime.split(":").map(Number);
+    const endMin = h * 60 + m + 60;
+    const eh = Math.min(Math.floor(endMin / 60), 23);
+    const em = endMin % 60;
+    return `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`;
+  }, [manualStartTime]);
+
+  const handleOpenManualModal = () => {
+    setManualStaffId(myProfile?.id ?? (staffProfiles[0]?.id ?? ""));
+    setManualEventType("orientation");
+    setManualCustomName("");
+    setManualStudentName("");
+    setManualStudentEmail("");
+    setManualDate(new Date().toISOString().split("T")[0]);
+    setManualStartTime("10:00");
+    setShowManualModal(true);
+  };
+
+  const handleManualSubmit = async () => {
+    if (!manualStudentName.trim() || !manualStaffId || !manualDate) return;
+    setManualSubmitting(true);
+    let meetLink: string | undefined;
+    if (calendarAccessToken) {
+      try {
+        const resp = await fetch(
+          "https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1",
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${calendarAccessToken}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              summary: `${EVENT_TYPE_LABELS[manualEventType]}${manualEventType === "other" && manualCustomName ? ` (${manualCustomName})` : ""} - ${manualStudentName}`,
+              start: { dateTime: `${manualDate}T${manualStartTime}:00`, timeZone: "Asia/Tokyo" },
+              end: { dateTime: `${manualDate}T${manualEndTime}:00`, timeZone: "Asia/Tokyo" },
+              ...(manualStudentEmail.trim() ? { attendees: [{ email: manualStudentEmail.trim() }] } : {}),
+              conferenceData: { createRequest: { requestId: `meet-manual-${Date.now()}`, conferenceSolutionKey: { type: "hangoutsMeet" } } },
+            }),
+          }
+        );
+        if (resp.ok) {
+          const data = await resp.json();
+          meetLink = data.conferenceData?.entryPoints?.find((e: { entryPointType: string; uri: string }) => e.entryPointType === "video")?.uri || undefined;
+        }
+      } catch { /* ignore */ }
+    }
+    createManualBooking({
+      staffId: manualStaffId,
+      date: manualDate,
+      startTime: manualStartTime,
+      endTime: manualEndTime,
+      eventType: manualEventType,
+      customEventName: manualEventType === "other" && manualCustomName.trim() ? manualCustomName.trim() : undefined,
+      studentName: manualStudentName.trim(),
+      studentEmail: manualStudentEmail.trim() || undefined,
+      meetLink,
+    });
+    setManualSubmitting(false);
+    setShowManualModal(false);
+    setToast(meetLink ? `予約を登録しました（Meet: ${meetLink}）` : "予約を手動登録しました");
+  };
 
   const filteredBookings = useMemo(() => {
     const sorted = [...bookings].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -1115,22 +1208,24 @@ function BookingsTab({
 
   return (
     <div>
-      {/* Calendar integration */}
-      <div className="mb-4 flex items-center gap-2">
-        {calendarAccessToken ? (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-700 rounded-lg">
-            <span className="w-2 h-2 bg-green-500 rounded-full" />
-            Google Calendar連携済み（Meet自動発行）
-          </span>
-        ) : (
-          <button
-            onClick={requestCalendarAccess}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-800 transition-colors"
-          >
-            <CalendarIcon className="w-3.5 h-3.5" />
-            Google Calendar連携（Meet自動発行）
-          </button>
-        )}
+      {/* Header row */}
+      <div className="mb-4 flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          {calendarAccessToken ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-700 rounded-lg">
+              <span className="w-2 h-2 bg-green-500 rounded-full" />
+              Google Calendar連携済み（Meet自動発行）
+            </span>
+          ) : !isDemoMode ? (
+            <span className="text-xs text-gray-400">「スタッフ設定」でGoogleカレンダーを連携するとMeetリンクが自動発行されます</span>
+          ) : null}
+        </div>
+        <button
+          onClick={handleOpenManualModal}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          + 手動予約登録
+        </button>
       </div>
       {/* Filter */}
       <div className="flex gap-2 mb-4 flex-wrap">
@@ -1302,6 +1397,157 @@ function BookingsTab({
           ))}
         </div>
       )}
+
+      {/* 手動予約登録モーダル */}
+      {showManualModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100">手動予約登録</h3>
+              <button onClick={() => setShowManualModal(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                <CloseIcon className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+
+              {/* 種別 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">種別 <span className="text-red-500">*</span></label>
+                <select
+                  value={manualEventType}
+                  onChange={e => setManualEventType(e.target.value as EventType)}
+                  className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {SLOT_EVENT_TYPES.map(t => (
+                    <option key={t} value={t}>{EVENT_TYPE_LABELS[t]}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* その他面談名 */}
+              {manualEventType === "other" && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">面談名</label>
+                  <input
+                    type="text"
+                    value={manualCustomName}
+                    onChange={e => setManualCustomName(e.target.value)}
+                    placeholder="例: OB訪問面談"
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              )}
+
+              {/* 担当者 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">担当者 <span className="text-red-500">*</span></label>
+                <select
+                  value={manualStaffId}
+                  onChange={e => setManualStaffId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {staffProfiles.map(p => (
+                    <option key={p.id} value={p.id}>{p.fullName || p.lastName}{p.id === myProfile?.id ? "（自分）" : ""}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 学生名 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">学生名 <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  value={manualStudentName}
+                  onChange={e => setManualStudentName(e.target.value)}
+                  placeholder="例: 山田 太郎"
+                  className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* 学生メール（任意） */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  学生メールアドレス
+                  <span className="ml-1 text-xs text-gray-400">（任意・Meetリンク招待に使用）</span>
+                </label>
+                <input
+                  type="email"
+                  value={manualStudentEmail}
+                  onChange={e => setManualStudentEmail(e.target.value)}
+                  placeholder="例: student@example.com"
+                  className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* 日付 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">日付 <span className="text-red-500">*</span></label>
+                <input
+                  type="date"
+                  value={manualDate}
+                  onChange={e => setManualDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* 時間 */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">開始時刻 <span className="text-red-500">*</span></label>
+                  <select
+                    value={manualStartTime}
+                    onChange={e => setManualStartTime(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {TIME_OPTIONS.filter(t => t <= "23:00").map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">終了時刻</label>
+                  <div className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
+                    {manualEndTime}
+                    <span className="ml-1 text-xs text-gray-400">（+1時間）</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Meet連携案内 */}
+              {calendarAccessToken ? (
+                <div className="flex items-center gap-2 text-xs text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 rounded-lg px-3 py-2">
+                  <span className="w-2 h-2 bg-green-500 rounded-full shrink-0" />
+                  Google Calendar連携済み。登録時にMeetリンクを自動発行します。
+                </div>
+              ) : (
+                <div className="text-xs text-gray-400 bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
+                  「スタッフ設定」でGoogleカレンダーを連携するとMeetリンクが自動発行されます。
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 px-5 pb-5">
+              <button
+                onClick={() => setShowManualModal(false)}
+                className="flex-1 py-2.5 text-sm border border-gray-200 dark:border-gray-600 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={handleManualSubmit}
+                disabled={!manualStudentName.trim() || !manualStaffId || !manualDate || manualSubmitting}
+                className={`flex-1 py-2.5 text-sm rounded-xl font-medium transition-colors ${
+                  manualStudentName.trim() && manualStaffId && manualDate && !manualSubmitting
+                    ? "bg-blue-600 text-white hover:bg-blue-700"
+                    : "bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed"
+                }`}
+              >
+                {manualSubmitting ? "登録中..." : calendarAccessToken ? "登録 & Meetリンク発行" : "登録"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1389,6 +1635,9 @@ function ProfileTab({
   addStaffProfile,
   updateStaffProfile,
   setToast,
+  calendarAccessToken,
+  requestCalendarAccess,
+  isDemoMode,
 }: {
   myProfile: StaffProfile | undefined;
   userEmail: string;
@@ -1396,6 +1645,9 @@ function ProfileTab({
   addStaffProfile: (profile: Omit<StaffProfile, "id">) => void;
   updateStaffProfile: (id: string, profile: Partial<StaffProfile>) => void;
   setToast: (msg: string) => void;
+  calendarAccessToken: string | null;
+  requestCalendarAccess: () => void;
+  isDemoMode: boolean;
 }) {
   const [lastName, setLastName] = useState(myProfile?.lastName ?? "");
   const [fullName, setFullName] = useState(myProfile?.fullName ?? "");
@@ -1609,6 +1861,41 @@ function ProfileTab({
           </div>
         </div>
       )}
+
+      {/* Google Calendar 連携セクション */}
+      <div className="mt-5 pt-5 border-t border-gray-100 dark:border-gray-700">
+        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
+          <CalendarIcon className="w-4 h-4 text-gray-500" />
+          Googleカレンダー連携
+        </h3>
+        {isDemoMode ? (
+          <p className="text-xs text-gray-400">デモモードでは連携できません</p>
+        ) : calendarAccessToken ? (
+          <div className="flex items-center gap-2 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700 rounded-xl px-4 py-3">
+            <span className="w-2.5 h-2.5 bg-green-500 rounded-full shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-green-700 dark:text-green-300">連携中</p>
+              <p className="text-xs text-green-600 dark:text-green-400">空き日程カレンダーにGoogleカレンダーの予定が表示されます。予約確定・手動登録時にMeetリンクが自動発行されます。</p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500 dark:text-gray-400">連携すると以下の機能が使えます：</p>
+            <ul className="text-xs text-gray-500 dark:text-gray-400 space-y-1 ml-3 list-disc">
+              <li>空き日程カレンダーにGoogleカレンダーの予定を表示</li>
+              <li>予約確定・手動登録時にGoogle Meetリンクを自動発行</li>
+            </ul>
+            <button
+              onClick={requestCalendarAccess}
+              className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-500 text-gray-700 dark:text-gray-300 text-sm rounded-xl hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors shadow-sm"
+            >
+              <CalendarIcon className="w-4 h-4" />
+              Googleアカウントで連携する
+            </button>
+            <p className="text-xs text-gray-400">※ 連携はブラウザセッション中のみ有効です。再ログイン後は再連携が必要です。</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

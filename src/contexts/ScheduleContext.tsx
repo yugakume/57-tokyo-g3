@@ -36,6 +36,17 @@ interface ScheduleContextType {
   cancelBooking: (bookingId: string) => void;
   getBookingByNumber: (bookingNumber: string, studentEmail: string) => Booking | undefined;
   updateBookingSlots: (bookingId: string, newSlotIds: string[]) => void;
+  createManualBooking: (params: {
+    staffId: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    eventType: EventType;
+    customEventName?: string;
+    studentName: string;
+    studentEmail?: string;
+    meetLink?: string;
+  }) => void;
 }
 
 const ScheduleContext = createContext<ScheduleContextType | undefined>(undefined);
@@ -314,13 +325,51 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     setDoc(doc(db, "bookings", bookingId), { selectedSlotIds: newSlotIds, updatedAt: now }, { merge: true });
   }, [isDemoUser]);
 
+  const createManualBooking = useCallback(({ staffId, date, startTime, endTime, eventType, customEventName, studentName, studentEmail, meetLink }: {
+    staffId: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    eventType: EventType;
+    customEventName?: string;
+    studentName: string;
+    studentEmail?: string;
+    meetLink?: string;
+  }) => {
+    if (isDemoUser) return;
+    const now = new Date().toISOString();
+    const slotId = crypto.randomUUID();
+    const bookingId = crypto.randomUUID();
+    const slot: TimeSlot = { id: slotId, staffId, date, startTime, endTime, eventType, customEventName, isBooked: true, bookingId };
+    const booking: Booking = {
+      id: bookingId,
+      bookingNumber: generateBookingNumber(),
+      studentName,
+      studentEmail: studentEmail || "",
+      selectedSlotIds: [slotId],
+      confirmedSlotId: slotId,
+      assignedStaffId: staffId,
+      eventType,
+      meetLink,
+      status: "confirmed" as BookingStatus,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setTimeSlots(prev => [...prev, slot]);
+    setBookings(prev => [...prev, booking]);
+    const { id: _sid, ...slotData } = slot;
+    const { id: _bid, ...bookingData } = booking;
+    setDoc(doc(db, "timeSlots", slotId), JSON.parse(JSON.stringify(slotData)));
+    setDoc(doc(db, "bookings", bookingId), JSON.parse(JSON.stringify(bookingData)));
+  }, [isDemoUser]);
+
   return (
     <ScheduleContext.Provider value={{
       staffProfiles, timeSlots, bookings, staffRoles,
       addStaffRole, updateStaffRole, deleteStaffRole,
       addStaffProfile, updateStaffProfile, deleteStaffProfile,
       addTimeSlot, addTimeSlots, deleteTimeSlot, getSlotsByStaff, getAvailableSlots,
-      createBooking, confirmBooking, cancelBooking, getBookingByNumber, updateBookingSlots,
+      createBooking, confirmBooking, cancelBooking, getBookingByNumber, updateBookingSlots, createManualBooking,
     }}>
       {children}
     </ScheduleContext.Provider>
