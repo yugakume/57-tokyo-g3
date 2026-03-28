@@ -3,10 +3,12 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import type { GmailToken } from "@/contexts/AuthContext";
 import { useTask } from "@/contexts/TaskContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
 import { PlusIcon, CloseIcon, TrashIcon, CheckIcon } from "@/components/Icons";
 import type { Task, TaskStatus, TaskPriority } from "@/types";
+import { sendGmail, buildTaskReminderHtml } from "@/lib/gmail";
 
 // =============================================
 // 定数
@@ -48,7 +50,7 @@ function getTodayStr(): string {
 // =============================================
 
 export default function TasksPage() {
-  const { user, isLoading, isAdmin } = useAuth();
+  const { user, isLoading, isAdmin, gmailToken } = useAuth();
   const router = useRouter();
   const { tasks, addTask, updateTask, deleteTask, updateTaskStatus } = useTask();
   const { staffProfiles, staffRoles } = useSchedule();
@@ -351,6 +353,7 @@ export default function TasksPage() {
           task={mailtoTask}
           staffProfiles={staffProfiles}
           onClose={() => setMailtoTask(null)}
+          gmailToken={gmailToken}
         />
       )}
 
@@ -1022,11 +1025,15 @@ function MailtoModal({
   task,
   staffProfiles,
   onClose,
+  gmailToken,
 }: {
   task: Task;
   staffProfiles: { email: string; lastName: string }[];
   onClose: () => void;
+  gmailToken: GmailToken | null;
 }) {
+  const [sending, setSending] = useState(false);
+
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -1048,6 +1055,35 @@ function MailtoModal({
   );
   const mailtoLink = `mailto:${allEmails}?subject=${subject}&body=${body}`;
 
+  const handleGmailSend = async () => {
+    if (!gmailToken) return;
+    setSending(true);
+    try {
+      const emails = isAll ? staffProfiles.map(p => p.email) : taskEmails;
+      const names = isAll
+        ? staffProfiles.map(p => p.lastName)
+        : taskEmails.map(e => staffProfiles.find(p => p.email === e)?.lastName || e);
+      const html = buildTaskReminderHtml({
+        taskTitle: task.title,
+        description: task.description,
+        dueDate: task.dueDate,
+        dueTime: task.dueTime,
+        assigneeNames: names,
+      });
+      await sendGmail({
+        accessToken: gmailToken.accessToken,
+        to: emails,
+        subject: `【Lueur】タスク: ${task.title}`,
+        htmlBody: html,
+      });
+      onClose();
+    } catch (e) {
+      alert('送信失敗: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md">
@@ -1068,13 +1104,23 @@ function MailtoModal({
             >
               閉じる
             </button>
-            <a
-              href={mailtoLink}
-              onClick={() => { setTimeout(onClose, 500); }}
-              className="flex-1 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-center"
-            >
-              メールを送信
-            </a>
+            {gmailToken ? (
+              <button
+                onClick={handleGmailSend}
+                disabled={sending}
+                className="flex-1 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {sending ? '送信中...' : '📧 Gmailで送信'}
+              </button>
+            ) : (
+              <a
+                href={mailtoLink}
+                onClick={() => { setTimeout(onClose, 500); }}
+                className="flex-1 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-center"
+              >
+                メールを送信
+              </a>
+            )}
           </div>
         </div>
       </div>

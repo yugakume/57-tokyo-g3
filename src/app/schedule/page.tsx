@@ -9,6 +9,8 @@ import type { EventType, TimeSlot, Booking, StaffProfile, StaffRole } from "@/ty
 import { TrashIcon, EditIcon, CheckIcon, CalendarIcon, CloseIcon, CopyIcon, ExternalLinkIcon, ChevronIcon } from "@/components/Icons";
 import Toast from "@/components/Toast";
 import { fetchCalendarEvents, type CalendarEvent } from "@/lib/googleCalendar";
+import { sendGmail, buildOrientationReminderHtml } from "@/lib/gmail";
+import type { GmailToken } from "@/contexts/AuthContext";
 
 type Tab = "slots" | "bookings" | "profile";
 
@@ -57,7 +59,7 @@ const STATUS_COLORS: Record<string, string> = {
 // =============================================
 
 export default function SchedulePage() {
-  const { user, isLoading, calendarAccounts, calendarAccessToken, requestCalendarAccess, removeCalendarAccount, isDemoMode } = useAuth();
+  const { user, isLoading, calendarAccounts, calendarAccessToken, requestCalendarAccess, removeCalendarAccount, isDemoMode, gmailToken, requestGmailAccess, removeGmailToken } = useAuth();
   const {
     staffProfiles, timeSlots, bookings, staffRoles,
     addStaffProfile, updateStaffProfile,
@@ -143,6 +145,7 @@ export default function SchedulePage() {
           setToast={setToast}
           calendarAccessToken={calendarAccessToken}
           isDemoMode={isDemoMode}
+          gmailToken={gmailToken}
         />
       )}
 
@@ -158,6 +161,9 @@ export default function SchedulePage() {
           requestCalendarAccess={requestCalendarAccess}
           removeCalendarAccount={removeCalendarAccount}
           isDemoMode={isDemoMode}
+          gmailToken={gmailToken}
+          requestGmailAccess={requestGmailAccess}
+          removeGmailToken={removeGmailToken}
         />
       )}
 
@@ -1158,6 +1164,7 @@ function BookingsTab({
   setToast,
   calendarAccessToken,
   isDemoMode,
+  gmailToken,
 }: {
   bookings: Booking[];
   timeSlots: TimeSlot[];
@@ -1173,10 +1180,13 @@ function BookingsTab({
   setToast: (msg: string) => void;
   calendarAccessToken: string | null;
   isDemoMode: boolean;
+  gmailToken: GmailToken | null;
 }) {
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "confirmed" | "cancelled">("all");
   const [confirmingBookingId, setConfirmingBookingId] = useState<string | null>(null);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
+  const [reminderSending, setReminderSending] = useState<string | null>(null);
+  const [reminderSent, setReminderSent] = useState<Set<string>>(new Set());
 
   // 手動予約モーダル
   const [showManualModal, setShowManualModal] = useState(false);
@@ -1250,6 +1260,49 @@ function BookingsTab({
     setToast(meetLink ? `予約を登録しました（Meet: ${meetLink}）` : "予約を手動登録しました");
   };
 
+  const upcomingConfirmed = useMemo(() => {
+    const now = Date.now();
+    const limit = now + 48 * 60 * 60 * 1000;
+    return bookings.filter(b => {
+      if (b.status !== 'confirmed' || !b.confirmedSlotId) return false;
+      const slot = timeSlots.find(s => s.id === b.confirmedSlotId);
+      if (!slot) return false;
+      const slotTime = new Date(slot.date + 'T' + slot.startTime + ':00').getTime();
+      return slotTime >= now && slotTime <= limit;
+    });
+  }, [bookings, timeSlots]);
+
+  const handleSendReminder = async (booking: Booking) => {
+    if (!gmailToken) return;
+    const slot = timeSlots.find(s => s.id === booking.confirmedSlotId);
+    const staff = booking.assignedStaffId ? staffProfiles.find(p => p.id === booking.assignedStaffId) : undefined;
+    if (!slot || !staff?.email) return;
+    setReminderSending(booking.id);
+    try {
+      const html = buildOrientationReminderHtml({
+        staffName: staff.lastName,
+        studentName: booking.studentName,
+        date: slot.date,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        eventTypeLabel: EVENT_TYPE_LABELS[booking.eventType],
+        meetLink: booking.meetLink,
+      });
+      await sendGmail({
+        accessToken: gmailToken.accessToken,
+        to: staff.email,
+        subject: `【説明会リマインド】${slot.date} ${slot.startTime}〜 ${booking.studentName}さん`,
+        htmlBody: html,
+      });
+      setReminderSent(prev => new Set([...prev, booking.id]));
+      setToast(`${staff.lastName}さんにリマインドを送信しました`);
+    } catch (e) {
+      setToast('送信に失敗しました: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setReminderSending(null);
+    }
+  };
+
   const filteredBookings = useMemo(() => {
     const sorted = [...bookings].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     if (statusFilter === "all") return sorted;
@@ -1303,6 +1356,40 @@ function BookingsTab({
           + 手動予約登録
         </button>
       </div>
+      {/* 48時間以内の説明会リマインドバナー */}
+      {upcomingConfirmed.length > 0 && (
+        <div className="mb-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl p-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                📅 48時間以内に {upcomingConfirmed.length}件 の説明会があります
+              </p>
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+                {upcomingConfirmed.map(b => {
+                  const slot = timeSlots.find(s => s.id === b.confirmedSlotId);
+                  return slot ? `${slot.date} ${slot.startTime} ${b.studentName}さん` : '';
+                }).filter(Boolean).join(' / ')}
+              </p>
+            </div>
+            {gmailToken ? (
+              <button
+                onClick={async () => {
+                  for (const b of upcomingConfirmed) {
+                    if (!reminderSent.has(b.id)) await handleSendReminder(b);
+                  }
+                }}
+                disabled={reminderSending !== null}
+                className="px-3 py-1.5 text-xs font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50"
+              >
+                {reminderSending ? '送信中...' : '📧 全員にリマインド送信'}
+              </button>
+            ) : (
+              <p className="text-xs text-amber-600">Gmailを連携するとワンクリックでリマインド送信できます（スタッフ設定タブ）</p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Filter */}
       <div className="flex gap-2 mb-4 flex-wrap">
         {(["all", "pending", "confirmed", "cancelled"] as const).map(status => (
@@ -1452,7 +1539,26 @@ function BookingsTab({
               )}
 
               {booking.status === "confirmed" && (
-                <div className="flex gap-2 pt-2 border-t border-gray-100">
+                <div className="flex gap-2 pt-2 border-t border-gray-100 flex-wrap">
+                  {gmailToken && !reminderSent.has(booking.id) && (() => {
+                    const slot = getSlot(booking.confirmedSlotId ?? '');
+                    if (!slot) return null;
+                    const slotTime = new Date(slot.date + 'T' + slot.startTime + ':00').getTime();
+                    const inRange = slotTime >= Date.now() && slotTime <= Date.now() + 72 * 3600000;
+                    if (!inRange) return null;
+                    return (
+                      <button
+                        onClick={() => handleSendReminder(booking)}
+                        disabled={reminderSending === booking.id}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs bg-amber-50 border border-amber-200 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50"
+                      >
+                        📧 {reminderSending === booking.id ? '送信中...' : 'リマインド送信'}
+                      </button>
+                    );
+                  })()}
+                  {reminderSent.has(booking.id) && (
+                    <span className="flex items-center gap-1 px-3 py-1.5 text-xs text-green-600">✓ 送信済み</span>
+                  )}
                   <button
                     onClick={() => handleCancel(booking.id)}
                     className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-200 text-gray-500 rounded-lg hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors"
@@ -1715,6 +1821,9 @@ function ProfileTab({
   requestCalendarAccess,
   removeCalendarAccount,
   isDemoMode,
+  gmailToken,
+  requestGmailAccess,
+  removeGmailToken,
 }: {
   myProfile: StaffProfile | undefined;
   userEmail: string;
@@ -1726,6 +1835,9 @@ function ProfileTab({
   requestCalendarAccess: () => void;
   removeCalendarAccount: (googleEmail: string) => void;
   isDemoMode: boolean;
+  gmailToken: GmailToken | null;
+  requestGmailAccess: () => void;
+  removeGmailToken: () => void;
 }) {
   const [lastName, setLastName] = useState(myProfile?.lastName ?? "");
   const [fullName, setFullName] = useState(myProfile?.fullName ?? "");
@@ -2003,6 +2115,41 @@ function ProfileTab({
             <p className="text-xs text-gray-400 pt-1">複数のGoogleアカウントを追加できます。予定はすべてまとめてカレンダーに表示されます。</p>
           </div>
         )}
+      </div>
+
+      {/* Gmail送信連携 */}
+      <div className="mt-5 pt-5 border-t border-gray-100 dark:border-gray-700">
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">Gmail リマインド送信</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+            連携すると、説明会・タスクのリマインドメールをワンクリックで送信できます。<br />
+            メールはあなたのGmailアカウントから送信されます（送信のみ・メール読み取り不可）。
+          </p>
+          {gmailToken ? (
+            <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-lg">
+              <div>
+                <p className="text-sm font-medium text-green-700 dark:text-green-300">✓ Gmail連携済み</p>
+                <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">
+                  有効期限: {new Date(gmailToken.expiresAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}まで
+                </p>
+              </div>
+              <button
+                onClick={removeGmailToken}
+                className="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
+              >
+                解除
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={requestGmailAccess}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300"
+            >
+              <svg viewBox="0 0 24 24" className="w-4 h-4"><path fill="#EA4335" d="M5.266 9.765A7.077 7.077 0 0 1 12 4.909c1.69 0 3.218.6 4.418 1.582L19.91 3C17.782 1.145 15.055 0 12 0 7.27 0 3.198 2.698 1.24 6.65l4.026 3.115Z"/><path fill="#34A853" d="M16.04 18.013c-1.09.703-2.474 1.078-4.04 1.078a7.077 7.077 0 0 1-6.723-4.823l-4.04 3.067A11.965 11.965 0 0 0 12 24c2.933 0 5.735-1.043 7.834-3l-3.793-2.987Z"/><path fill="#4A90E2" d="M19.834 21c2.195-2.048 3.62-5.096 3.62-9 0-.71-.109-1.473-.272-2.182H12v4.637h6.436c-.317 1.559-1.17 2.766-2.395 3.558L19.834 21Z"/><path fill="#FBBC05" d="M5.277 14.268A7.12 7.12 0 0 1 4.909 12c0-.782.125-1.533.357-2.235L1.24 6.65A11.934 11.934 0 0 0 0 12c0 1.92.445 3.73 1.237 5.335l4.04-3.067Z"/></svg>
+              Gmailを連携する（送信のみ）
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

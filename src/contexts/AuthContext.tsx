@@ -18,6 +18,12 @@ export interface CalendarAccount {
 
 const CALENDAR_ACCOUNTS_KEY = "portal_calendar_accounts";
 
+export interface GmailToken {
+  accessToken: string;
+  expiresAt: number; // Unix ms
+}
+const GMAIL_TOKEN_KEY = 'portal_gmail_token';
+
 // =============================================
 // 設定
 // =============================================
@@ -54,6 +60,10 @@ interface AuthContextType {
   calendarAccessToken: string | null;  // 後方互換: 1つ目のトークン
   requestCalendarAccess: () => void;    // アカウント追加
   removeCalendarAccount: (googleEmail: string) => void;
+  // Gmail送信連携
+  gmailToken: GmailToken | null;
+  requestGmailAccess: () => void;
+  removeGmailToken: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -74,6 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [allowedEmails, setAllowedEmails] = useState<string[]>([]);
   const [adminEmails, setAdminEmails] = useState<string[]>([]);
   const [calendarAccounts, setCalendarAccounts] = useState<CalendarAccount[]>([]);
+  const [gmailToken, setGmailToken] = useState<GmailToken | null>(null);
 
   // 後方互換：1つ目のアカウントのトークンを返す
   const calendarAccessToken = calendarAccounts[0]?.accessToken ?? null;
@@ -90,6 +101,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (valid.length !== parsed.length) {
           localStorage.setItem(CALENDAR_ACCOUNTS_KEY, JSON.stringify(valid));
         }
+      }
+      // Gmail token restore
+      const storedGmail = localStorage.getItem(GMAIL_TOKEN_KEY);
+      if (storedGmail) {
+        const parsedGmail = JSON.parse(storedGmail) as GmailToken;
+        if (parsedGmail.expiresAt > Date.now()) setGmailToken(parsedGmail);
+        else localStorage.removeItem(GMAIL_TOKEN_KEY);
       }
     } catch { /* ignore */ }
   }, []);
@@ -380,6 +398,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     tokenClient.requestAccessToken();
   }, []);
 
+  const requestGmailAccess = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const g = (window as unknown as Record<string, unknown>).google as
+      | { accounts: { oauth2: { initTokenClient: (config: Record<string, unknown>) => { requestAccessToken: () => void } } } }
+      | undefined;
+    if (!g?.accounts?.oauth2?.initTokenClient) {
+      alert('Google Identity Services の読み込みに失敗しました。ページを再読み込みしてください。');
+      return;
+    }
+    const tokenClient = g.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: 'https://www.googleapis.com/auth/gmail.send',
+      callback: (response: Record<string, unknown>) => {
+        const accessToken = response.access_token as string | undefined;
+        if (!accessToken) return;
+        const token: GmailToken = { accessToken, expiresAt: Date.now() + 3540 * 1000 };
+        setGmailToken(token);
+        try { localStorage.setItem(GMAIL_TOKEN_KEY, JSON.stringify(token)); } catch { /* ignore */ }
+      },
+    });
+    tokenClient.requestAccessToken();
+  }, []);
+
+  const removeGmailToken = useCallback(() => {
+    setGmailToken(null);
+    localStorage.removeItem(GMAIL_TOKEN_KEY);
+  }, []);
+
   // アカウント削除
   const removeCalendarAccount = useCallback((googleEmail: string) => {
     setCalendarAccounts(prev => {
@@ -398,6 +444,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       allowedEmails, adminEmails,
       addAllowedEmail, removeAllowedEmail, addAdminEmail, removeAdminEmail,
       calendarAccounts, calendarAccessToken, requestCalendarAccess, removeCalendarAccount,
+      gmailToken, requestGmailAccess, removeGmailToken,
     }}>
       {children}
     </AuthContext.Provider>
