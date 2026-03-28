@@ -1,36 +1,22 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import type { User } from "@/types";
 import { db } from "@/lib/firebase";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
 
 // =============================================
-// Cloud Functions ベースURL
-// =============================================
-const FUNCTIONS_BASE_URL =
-  process.env.NODE_ENV === "production"
-    ? "https://us-central1-astute-city-490906-k6.cloudfunctions.net"
-    : "http://localhost:5001/astute-city-490906-k6/us-central1";
-
-async function callFunction<T>(name: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${FUNCTIONS_BASE_URL}/${name}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`${name} failed: ${res.status}`);
-  return res.json() as Promise<T>;
-}
-
-// =============================================
 // 連携済みGoogleカレンダーアカウント
+// ※ 将来: Cloud Functions (functions/src/index.ts) でトークンを永続化予定
+//    Blaze プランへのアップグレード後に有効化する
 // =============================================
 export interface CalendarAccount {
   googleEmail: string;
   accessToken: string;
-  expiresAt: number;
+  expiresAt: number;  // Unix ms。約1時間で期限切れ
 }
+
+const CALENDAR_ACCOUNTS_KEY = "portal_calendar_accounts";
 
 // =============================================
 // 設定
@@ -88,10 +74,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [allowedEmails, setAllowedEmails] = useState<string[]>([]);
   const [adminEmails, setAdminEmails] = useState<string[]>([]);
   const [calendarAccounts, setCalendarAccounts] = useState<CalendarAccount[]>([]);
-  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // 後方互換：1つ目のアカウントのトークンを返す
   const calendarAccessToken = calendarAccounts[0]?.accessToken ?? null;
+
+  // localStorageから有効なアカウントを復元（起動時）
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(CALENDAR_ACCOUNTS_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as CalendarAccount[];
+        const now = Date.now();
+        const valid = parsed.filter(a => a.expiresAt > now);
+        if (valid.length > 0) setCalendarAccounts(valid);
+        if (valid.length !== parsed.length) {
+          localStorage.setItem(CALENDAR_ACCOUNTS_KEY, JSON.stringify(valid));
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
 
   // 初期化: Firestoreから許可メール・管理者メールをリアルタイム購読
   useEffect(() => {
@@ -298,102 +299,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [adminEmails]);
 
   // =============================================
-  // Googleカレンダー連携（複数アカウント・永続）
+  // Googleカレンダー連携（複数アカウント・セッション内保持）
+  // ※ 将来: Blaze プラン + Cloud Functions (functions/src/index.ts) で永続化予定
   // =============================================
 
-  // Cloud Functionsからアカウント一覧を取得し、各トークンを更新
-  const loadCalendarAccounts = useCallback(async (userId: string) => {
-    if (!userId) return;
-    try {
-      const { accounts } = await callFunction<{ accounts: { googleEmail: string }[] }>(
-        "listCalendarAccounts", { userId }
-      );
-      if (!accounts.length) return;
-
-      const loaded: CalendarAccount[] = [];
-      for (const { googleEmail } of accounts) {
-        try {
-          const result = await callFunction<{ accessToken: string; expiresAt: number; googleEmail: string }>(
-            "getCalendarToken", { userId, googleEmail }
-          );
-          loaded.push({ googleEmail: result.googleEmail, accessToken: result.accessToken, expiresAt: result.expiresAt });
-        } catch { /* このアカウントはスキップ */ }
-      }
-      if (loaded.length > 0) setCalendarAccounts(loaded);
-    } catch { /* Cloud Functions未デプロイ時は無視 */ }
-  }, []);
-
-  // ログイン時にカレンダーアカウントをロード
-  useEffect(() => {
-    if (user?.uid && !user.isDemoUser) {
-      loadCalendarAccounts(user.uid);
-    } else if (!user) {
-      setCalendarAccounts([]);
-    }
-  }, [user, loadCalendarAccounts]);
-
-  // 50分ごとにトークンを自動更新
-  useEffect(() => {
-    if (!user?.uid || user.isDemoUser || calendarAccounts.length === 0) return;
-    if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
-    refreshTimerRef.current = setInterval(() => {
-      loadCalendarAccounts(user.uid);
-    }, 50 * 60 * 1000);
-    return () => {
-      if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
-    };
-  }, [user, calendarAccounts.length, loadCalendarAccounts]);
-
-  // アカウント追加（OAuth認証コードフロー → Cloud Function でトークン取得）
+  // アカウント追加（implicit flow → access_token + userinfo で email 取得）
   const requestCalendarAccess = useCallback(() => {
-    if (typeof window === 'undefined' || !user) return;
+    if (typeof window === 'undefined') return;
     const g = (window as unknown as Record<string, unknown>).google as
-      | { accounts: { oauth2: { initCodeClient: (config: Record<string, unknown>) => { requestCode: () => void } } } }
+      | { accounts: { oauth2: { initTokenClient: (config: Record<string, unknown>) => { requestAccessToken: () => void } } } }
       | undefined;
-    if (!g?.accounts?.oauth2?.initCodeClient) {
+    if (!g?.accounts?.oauth2?.initTokenClient) {
       alert("Google Identity Services の読み込みに失敗しました。ページを再読み込みしてください。");
       return;
     }
 
-    const codeClient = g.accounts.oauth2.initCodeClient({
+    const tokenClient = g.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: "https://www.googleapis.com/auth/calendar.events",
-      access_type: "offline",
-      prompt: "consent",
       callback: async (response: Record<string, unknown>) => {
-        const code = response.code as string | undefined;
-        if (!code) return;
+        const accessToken = response.access_token as string | undefined;
+        if (!accessToken) return;
+        // アクセストークンからGoogleメールを取得
         try {
-          const result = await callFunction<{ accessToken: string; expiresAt: number; googleEmail: string }>(
-            "exchangeAuthCode", { code, userId: user.uid }
-          );
-          setCalendarAccounts(prev => {
-            // 同じメールが既にあれば更新、なければ追加
-            const exists = prev.find(a => a.googleEmail === result.googleEmail);
-            if (exists) {
-              return prev.map(a => a.googleEmail === result.googleEmail
-                ? { ...a, accessToken: result.accessToken, expiresAt: result.expiresAt }
-                : a
-              );
-            }
-            return [...prev, { googleEmail: result.googleEmail, accessToken: result.accessToken, expiresAt: result.expiresAt }];
+          const userInfoRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+            headers: { Authorization: `Bearer ${accessToken}` },
           });
-        } catch (e) {
-          alert("Googleカレンダーの連携に失敗しました。Cloud Functionsがデプロイされているか確認してください。\n" + String(e));
+          const userInfo = await userInfoRes.json() as { email?: string };
+          const googleEmail = userInfo.email ?? "unknown";
+          const expiresAt = Date.now() + 3540 * 1000; // 59分
+
+          setCalendarAccounts(prev => {
+            const next = prev.find(a => a.googleEmail === googleEmail)
+              ? prev.map(a => a.googleEmail === googleEmail ? { ...a, accessToken, expiresAt } : a)
+              : [...prev, { googleEmail, accessToken, expiresAt }];
+            localStorage.setItem(CALENDAR_ACCOUNTS_KEY, JSON.stringify(next));
+            return next;
+          });
+        } catch {
+          // メール取得失敗時はメールなしで追加
+          const expiresAt = Date.now() + 3540 * 1000;
+          setCalendarAccounts(prev => {
+            const next = [...prev, { googleEmail: "unknown", accessToken, expiresAt }];
+            localStorage.setItem(CALENDAR_ACCOUNTS_KEY, JSON.stringify(next));
+            return next;
+          });
         }
       },
     });
-    codeClient.requestCode();
-  }, [user]);
+    tokenClient.requestAccessToken();
+  }, []);
 
   // アカウント削除
-  const removeCalendarAccount = useCallback(async (googleEmail: string) => {
-    if (!user) return;
-    try {
-      await callFunction("revokeCalendarAccount", { userId: user.uid, googleEmail });
-    } catch { /* 削除失敗してもstateは更新する */ }
-    setCalendarAccounts(prev => prev.filter(a => a.googleEmail !== googleEmail));
-  }, [user]);
+  const removeCalendarAccount = useCallback((googleEmail: string) => {
+    setCalendarAccounts(prev => {
+      const next = prev.filter(a => a.googleEmail !== googleEmail);
+      localStorage.setItem(CALENDAR_ACCOUNTS_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
 
   const isAdmin = user?.role === "admin";
 

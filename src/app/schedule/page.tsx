@@ -1899,10 +1899,10 @@ function ProfileTab({
             <ul className="text-xs text-gray-500 dark:text-gray-400 space-y-1 ml-3 list-disc">
               <li>空き日程カレンダーにGoogleカレンダーの予定を表示（複数アカウント対応）</li>
               <li>予約確定・手動登録時にGoogle Meetリンクを自動発行</li>
-              <li>ページを再読み込みしても連携が持続する</li>
             </ul>
             <p className="text-xs text-gray-400 bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
-              右上の「アカウントを追加」ボタンからGoogleアカウントで連携してください。
+              右上の「アカウントを追加」ボタンからGoogleアカウントで連携してください。<br />
+              ※ トークンは約1時間で期限切れになります。期限切れになったら再連携してください。
             </p>
           </div>
         ) : (
@@ -1914,7 +1914,7 @@ function ProfileTab({
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-green-800 dark:text-green-200 truncate">{acc.googleEmail}</p>
                     <p className="text-xs text-green-600 dark:text-green-400">
-                      自動更新中 · トークン有効期限: {new Date(acc.expiresAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
+                      連携中 · {new Date(acc.expiresAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })} まで有効
                     </p>
                   </div>
                 </div>
