@@ -453,7 +453,8 @@ export default function CalendarPage() {
                   return (
                     <div
                       key={event.id}
-                      className={`rounded-lg p-3 ${typeColor[event.type].bg} border ${borderColor}`}
+                      onClick={() => navPath && router.push(navPath)}
+                      className={`rounded-lg p-3 ${typeColor[event.type].bg} border ${borderColor} ${navPath ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <span className={`w-2 h-2 rounded-full ${typeColor[event.type].dot}`} />
@@ -462,14 +463,6 @@ export default function CalendarPage() {
                         </span>
                         {event.time && (
                           <span className="text-xs text-gray-500 dark:text-gray-400">{event.time}</span>
-                        )}
-                        {navPath && (
-                          <button
-                            onClick={() => router.push(navPath)}
-                            className={`ml-auto text-xs underline ${typeColor[event.type].text} hover:opacity-70 transition-opacity`}
-                          >
-                            詳細を見る →
-                          </button>
                         )}
                       </div>
                       <p className={`text-sm font-medium ${typeColor[event.type].text}`}>{event.title}</p>
