@@ -8,6 +8,7 @@ import { useSchedule } from "@/contexts/ScheduleContext";
 import { useCountdown } from "@/contexts/CountdownContext";
 import Toast from "@/components/Toast";
 import { LinkIcon, PlusIcon, TrashIcon, EditIcon, CloseIcon } from "@/components/Icons";
+import { getRecentQuotaErrors, clearQuotaErrors } from "@/lib/firestoreCache";
 import type { LinkItem, LinkIconType, AccountInfo, InstagramAccount, Announcement, AnnouncementCategory } from "@/types";
 
 type Tab = "links" | "categories" | "accounts" | "users" | "roles" | "announcements" | "announcementCategories" | "countdowns" | "branch";
@@ -26,6 +27,11 @@ export default function AdminPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("links");
   const [toast, setToast] = useState("");
+  const [quotaErrors, setQuotaErrors] = useState<number[]>([]);
+
+  useEffect(() => {
+    setQuotaErrors(getRecentQuotaErrors());
+  }, []);
 
   // Link form state
   const [showLinkForm, setShowLinkForm] = useState(false);
@@ -392,6 +398,28 @@ export default function AdminPage() {
   return (
     <>
       {toast && <Toast message={toast} onClose={() => setToast("")} />}
+
+      {/* Firestore クォータ警告バナー */}
+      {quotaErrors.length > 0 && (
+        <div className="mx-4 mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl flex items-start gap-3">
+          <span className="text-red-500 text-xl shrink-0">⚠️</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-red-700 dark:text-red-300">
+              Firestore クォータ超過が検知されました（直近24時間: {quotaErrors.length}回）
+            </p>
+            <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+              最終発生: {new Date(Math.max(...quotaErrors)).toLocaleString("ja-JP")}
+              　／　データはキャッシュから表示されています。クォータは毎日午後4〜5時にリセットされます。
+            </p>
+          </div>
+          <button
+            onClick={() => { clearQuotaErrors(); setQuotaErrors([]); }}
+            className="text-xs text-red-500 hover:text-red-700 shrink-0 px-2 py-1 rounded hover:bg-red-100 dark:hover:bg-red-800/30"
+          >
+            閉じる
+          </button>
+        </div>
+      )}
       <div className="max-w-5xl mx-auto px-4 py-6">
         <div className="mb-5">
           <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-1">管理者パネル</h1>

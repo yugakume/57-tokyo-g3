@@ -2,18 +2,15 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import { db } from "@/lib/firebase";
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
+import { collection, doc, setDoc, deleteDoc, getDocs } from "firebase/firestore";
 import { useAuth } from "@/contexts/AuthContext";
 import { DEMO_COUNTDOWNS } from "@/lib/demoData";
-
-// =============================================
-// CountdownContext
-// =============================================
+import { loadCache, saveCache, trackQuotaError } from "@/lib/firestoreCache";
 
 export interface CountdownItem {
   id: string;
   title: string;
-  targetDate: string; // ISO date string in JST e.g. "2026-04-01"
+  targetDate: string;
   createdBy: string;
 }
 
@@ -25,9 +22,7 @@ interface CountdownContextType {
 
 const CountdownContext = createContext<CountdownContextType | undefined>(undefined);
 
-// =============================================
-// Provider
-// =============================================
+const CACHE_KEY = "portal_countdowns";
 
 export function CountdownProvider({ children }: { children: ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -43,13 +38,30 @@ export function CountdownProvider({ children }: { children: ReactNode }) {
       setLoaded(true);
       return;
     }
-    const unsub = onSnapshot(collection(db, "countdowns"), (snapshot) => {
-      const data = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }) as CountdownItem);
-      setCountdowns(data);
+
+    const cached = loadCache<CountdownItem>(CACHE_KEY);
+    if (cached) {
+      setCountdowns(cached);
       setLoaded(true);
-    });
-    return () => unsub();
-  }, [isDemoUser, isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+      return;
+    }
+
+    getDocs(collection(db, "countdowns"))
+      .then(snap => {
+        const data = snap.docs.map(d => ({ ...d.data(), id: d.id }) as CountdownItem);
+        setCountdowns(data);
+        saveCache(CACHE_KEY, data);
+        setLoaded(true);
+      })
+      .catch(() => {
+        trackQuotaError();
+        setLoaded(true);
+      });
+  }, [isDemoUser, isLoading]);
+
+  useEffect(() => {
+    if (loaded && !isDemoUser) saveCache(CACHE_KEY, countdowns);
+  }, [countdowns, loaded, isDemoUser]);
 
   const addCountdown = useCallback((item: Omit<CountdownItem, "id">) => {
     if (isDemoUser) return;
@@ -57,14 +69,14 @@ export function CountdownProvider({ children }: { children: ReactNode }) {
       ...item,
       id: `countdown-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     };
-    setCountdowns((prev) => [...prev, newItem]);
+    setCountdowns(prev => [...prev, newItem]);
     const { id, ...data } = newItem;
     setDoc(doc(db, "countdowns", id), data);
   }, [isDemoUser]);
 
   const deleteCountdown = useCallback((id: string) => {
     if (isDemoUser) return;
-    setCountdowns((prev) => prev.filter((c) => c.id !== id));
+    setCountdowns(prev => prev.filter(c => c.id !== id));
     deleteDoc(doc(db, "countdowns", id));
   }, [isDemoUser]);
 

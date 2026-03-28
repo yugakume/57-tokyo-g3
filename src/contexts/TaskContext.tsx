@@ -3,13 +3,10 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import type { Task, TaskStatus } from "@/types";
 import { db } from "@/lib/firebase";
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
+import { collection, doc, setDoc, deleteDoc, getDocs } from "firebase/firestore";
 import { useAuth } from "@/contexts/AuthContext";
 import { DEMO_TASKS } from "@/lib/demoData";
-
-// =============================================
-// TaskContext
-// =============================================
+import { loadCache, saveCache, trackQuotaError } from "@/lib/firestoreCache";
 
 interface TaskContextType {
   tasks: Task[];
@@ -21,9 +18,7 @@ interface TaskContextType {
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
 
-// =============================================
-// Provider
-// =============================================
+const CACHE_KEY = "portal_tasks";
 
 const cleanData = (obj: Record<string, unknown>) => {
   const cleaned: Record<string, unknown> = {};
@@ -47,13 +42,30 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       setLoaded(true);
       return;
     }
-    const unsub = onSnapshot(collection(db, "tasks"), (snapshot) => {
-      const data = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }) as Task);
-      setTasks(data);
+
+    const cached = loadCache<Task>(CACHE_KEY);
+    if (cached) {
+      setTasks(cached);
       setLoaded(true);
-    });
-    return () => unsub();
-  }, [isDemoUser, isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+      return;
+    }
+
+    getDocs(collection(db, "tasks"))
+      .then(snap => {
+        const data = snap.docs.map(d => ({ ...d.data(), id: d.id }) as Task);
+        setTasks(data);
+        saveCache(CACHE_KEY, data);
+        setLoaded(true);
+      })
+      .catch(() => {
+        trackQuotaError();
+        setLoaded(true);
+      });
+  }, [isDemoUser, isLoading]);
+
+  useEffect(() => {
+    if (loaded && !isDemoUser) saveCache(CACHE_KEY, tasks);
+  }, [tasks, loaded, isDemoUser]);
 
   const addTask = useCallback((t: Omit<Task, "id" | "createdAt" | "updatedAt">): Task => {
     const now = new Date().toISOString();
@@ -64,7 +76,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
     };
     if (!isDemoUser) {
-      setTasks((prev) => [newTask, ...prev]);
+      setTasks(prev => [newTask, ...prev]);
       const { id, ...data } = newTask;
       setDoc(doc(db, "tasks", id), cleanData(data as unknown as Record<string, unknown>));
     }
@@ -74,20 +86,20 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   const updateTask = useCallback((id: string, updates: Partial<Task>) => {
     if (isDemoUser) return;
     const updatedAt = new Date().toISOString();
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates, updatedAt } : t)));
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates, updatedAt } : t));
     setDoc(doc(db, "tasks", id), cleanData({ ...updates, updatedAt } as unknown as Record<string, unknown>), { merge: true });
   }, [isDemoUser]);
 
   const deleteTask = useCallback((id: string) => {
     if (isDemoUser) return;
-    setTasks((prev) => prev.filter((t) => t.id !== id));
+    setTasks(prev => prev.filter(t => t.id !== id));
     deleteDoc(doc(db, "tasks", id));
   }, [isDemoUser]);
 
   const updateTaskStatus = useCallback((id: string, status: TaskStatus) => {
     if (isDemoUser) return;
     const updatedAt = new Date().toISOString();
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, status, updatedAt } : t)));
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, status, updatedAt } : t));
     setDoc(doc(db, "tasks", id), { status, updatedAt }, { merge: true });
   }, [isDemoUser]);
 

@@ -7,7 +7,8 @@ import { useMeetingMinutes } from "@/contexts/MeetingMinutesContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
 import { ExternalLinkIcon } from "@/components/Icons";
 import { db } from "@/lib/firebase";
-import { doc, setDoc, onSnapshot, collection } from "firebase/firestore";
+import { doc, setDoc, getDocs, collection } from "firebase/firestore";
+import { loadCache, saveCache, trackQuotaError } from "@/lib/firestoreCache";
 
 interface ExpenseRecord {
   id: string; // email_yearMonth
@@ -41,15 +42,20 @@ export default function ExpensesPage() {
     if (!isLoading && !user) router.push("/");
   }, [user, isLoading, router]);
 
-  // Listen to expenses collection
+  // expenses を getDocs + localStorage キャッシュで取得
   useEffect(() => {
     if (!user) return;
-    const unsub = onSnapshot(collection(db, "expenses"), (snap) => {
-      const data = snap.docs.map(d => ({ ...d.data(), id: d.id }) as ExpenseRecord);
-      setExpenses(data);
-    });
-    return () => unsub();
-  }, [user]);
+    const CACHE_KEY = "portal_expenses";
+    const cached = loadCache<ExpenseRecord>(CACHE_KEY);
+    if (cached) { setExpenses(cached); return; }
+    getDocs(collection(db, "expenses"))
+      .then(snap => {
+        const data = snap.docs.map(d => ({ ...d.data(), id: d.id }) as ExpenseRecord);
+        setExpenses(data);
+        saveCache(CACHE_KEY, data);
+      })
+      .catch(() => trackQuotaError());
+  }, [user?.email]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const myProfile = useMemo(() => {
     if (!user) return undefined;
@@ -83,11 +89,12 @@ export default function ExpensesPage() {
   const saveExpense = useCallback(async (ym: string, amount: number) => {
     if (!user) return;
     const docId = `${user.email}_${ym}`;
-    await setDoc(doc(db, "expenses", docId), {
-      id: docId,
-      email: user.email,
-      yearMonth: ym,
-      amount,
+    const record = { id: docId, email: user.email, yearMonth: ym, amount };
+    await setDoc(doc(db, "expenses", docId), record);
+    setExpenses(prev => {
+      const updated = [...prev.filter(e => e.id !== docId), record];
+      saveCache("portal_expenses", updated);
+      return updated;
     });
     setEditingMonth(null);
     setEditAmount("");
