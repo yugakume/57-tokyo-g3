@@ -119,18 +119,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return myProfile?.fullName || myProfile?.lastName || user.displayName;
   }, [user, myProfile]);
 
-  // Load saved nav order from localStorage
-  useEffect(() => {
-    if (!user) return;
-    try {
-      const stored = localStorage.getItem(`navOrder-${user.email}`);
-      if (stored) setNavOrder(JSON.parse(stored));
-    } catch {}
-  }, [user?.email]);
-
-  if (!user) return <>{children}</>;
-
-  const baseNavItems = [
+  // Build base nav items (must be before useMemo below)
+  const baseNavItems = useMemo(() => [
     { href: "/dashboard", label: "ホーム", icon: HomeIcon },
     { href: "/news", label: "お知らせ", icon: BellIcon },
     { href: "/links", label: "業務リンク集", icon: LinkListIcon },
@@ -143,9 +133,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/calendar", label: "カレンダー", icon: CalendarIcon },
     { href: "/activity", label: "行動量報告", icon: ActivityIcon },
     ...(isAdmin ? [{ href: "/admin", label: "管理", icon: SettingsIcon }] : []),
-  ];
+  ], [isAdmin]);
 
-  // Apply saved order
+  // Apply saved order (must stay before early return)
   const navItems = useMemo(() => {
     if (navOrder.length === 0) return baseNavItems;
     const ordered = navOrder
@@ -155,8 +145,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (!ordered.find((n) => n.href === item.href)) ordered.push(item);
     });
     return ordered;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navOrder, isAdmin]);
+  }, [navOrder, baseNavItems]);
+
+  // Load saved nav order from localStorage
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const stored = localStorage.getItem(`navOrder-${user.email}`);
+      if (stored) setNavOrder(JSON.parse(stored));
+    } catch {}
+  }, [user?.email]);
+
+  if (!user) return <>{children}</>;
+
 
   const handleNavDrop = () => {
     if (dragNavItem.current === null || dragNavOverItem.current === null) return;
