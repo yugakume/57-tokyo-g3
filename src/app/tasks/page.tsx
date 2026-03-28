@@ -57,6 +57,7 @@ export default function TasksPage() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [filterAssignee, setFilterAssignee] = useState("all");
   const [hideDone, setHideDone] = useState(false);
+  const [taskCategory, setTaskCategory] = useState<"mine" | "requested">("mine");
   const [toast, setToast] = useState("");
   const [toastType, setToastType] = useState<"normal" | "done">("normal");
   const [mailtoTask, setMailtoTask] = useState<Task | null>(null);
@@ -81,6 +82,19 @@ export default function TasksPage() {
   // ヘルパー: タスクが複数人タスクか（全体含む）
   const isMultiTask = (t: Task) => isAllTask(t) || (t.assigneeEmails?.length ?? 0) > 1;
 
+  // 自分のロールID
+  const myRoleIds = useMemo(() => {
+    const profile = staffProfiles.find(p => p.email === user?.email);
+    return profile?.roleIds || [];
+  }, [staffProfiles, user]);
+
+  // タスクが自分に割り当てられているか
+  const isAssignedToMe = useCallback((t: Task) => {
+    if (isAllTask(t)) return true;
+    if ((t.assigneeEmails || []).includes(user?.email || "")) return true;
+    return (t.assigneeEmails || []).some(e => e.startsWith("role:") && myRoleIds.includes(e.replace("role:", "")));
+  }, [user, myRoleIds]);
+
   // 担当者フィルタの選択肢
   const assigneeOptions = useMemo(() => {
     const emails = new Set<string>();
@@ -90,16 +104,32 @@ export default function TasksPage() {
     return Array.from(emails).sort();
   }, [tasks]);
 
-  // フィルタ済みタスク
+  // フィルタ済みタスク（カテゴリ + 担当者フィルタ）
   const filteredTasks = useMemo(() => {
     let result = tasks;
+
+    // カテゴリフィルタ
+    if (taskCategory === "mine") {
+      // 自分に割り当てられたタスク（自分が作成 or 他人が依頼、すべて含む）
+      result = result.filter(t => isAssignedToMe(t));
+    } else if (taskCategory === "requested") {
+      // 自分が作成し、他人に依頼したタスク
+      result = result.filter(t => {
+        if (t.createdBy !== user?.email) return false;
+        const emails = t.assigneeEmails || [];
+        if (emails.length === 1 && emails[0] === user?.email) return false;
+        return true;
+      });
+    }
+
+    // 担当者フィルタ（追加絞り込み）
     if (filterAssignee !== "all") {
       result = result.filter(t =>
         isAllTask(t) || (t.assigneeEmails || []).includes(filterAssignee)
       );
     }
     return result;
-  }, [tasks, filterAssignee]);
+  }, [tasks, filterAssignee, taskCategory, user, isAssignedToMe]);
 
   // カラムごとのタスク
   const columnTasks = useMemo(() => {
@@ -193,6 +223,26 @@ export default function TasksPage() {
           <PlusIcon className="w-4 h-4" />
           タスクを追加
         </button>
+      </div>
+
+      {/* Category Tabs */}
+      <div className="flex gap-1 mb-4 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+        {([
+          { key: "mine", label: "自分のタスク" },
+          { key: "requested", label: "依頼したタスク" },
+        ] as const).map(cat => (
+          <button
+            key={cat.key}
+            onClick={() => setTaskCategory(cat.key)}
+            className={`flex-1 px-3 py-2 text-sm rounded-md transition-colors ${
+              taskCategory === cat.key
+                ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm font-medium"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+            }`}
+          >
+            {cat.label}
+          </button>
+        ))}
       </div>
 
       {/* Filter */}
@@ -346,7 +396,6 @@ function TaskCard({
   currentUserEmail: string;
   isCompleting?: boolean;
 }) {
-  const priorityCfg = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG.medium;
   const today = getTodayStr();
   const isOverdue = task.dueDate && task.dueDate < today && task.status !== "done";
   const emails = task.assigneeEmails || [];
@@ -373,12 +422,9 @@ function TaskCard({
       } ${isCompleting ? "border-green-400 bg-green-50 dark:bg-green-900/30 ring-2 ring-green-400/50" : ""}`}
       style={isCompleting ? { transform: "scale(1.02)", transition: "all 0.3s ease" } : undefined}
     >
-      {/* Title & Priority */}
-      <div className="flex items-start justify-between gap-2 mb-2">
+      {/* Title */}
+      <div className="mb-2">
         <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 leading-snug">{task.title}</h3>
-        <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded-full shrink-0 ${priorityCfg.color}`}>
-          {priorityCfg.label}
-        </span>
       </div>
 
       {/* Description preview */}
@@ -743,13 +789,18 @@ function TaskModal({
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">期限</label>
             <MiniCalendar selectedDate={dueDate} onSelectDate={(d) => { setDueDate(d); if (!dueTime) setDueTime("18:00"); }} />
             <div className="flex items-center gap-3 mt-2">
-              <input
-                type="time"
+              <select
                 value={dueTime}
                 onChange={e => setDueTime(e.target.value)}
-                placeholder="時間（任意）"
                 className="flex-1 px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              >
+                <option value="">時間を選択</option>
+                {Array.from({ length: 48 }, (_, i) => {
+                  const h = String(Math.floor(i / 2)).padStart(2, "0");
+                  const m = i % 2 === 0 ? "00" : "30";
+                  return <option key={i} value={`${h}:${m}`}>{h}:{m}</option>;
+                })}
+              </select>
               {dueDate && (
                 <button
                   type="button"

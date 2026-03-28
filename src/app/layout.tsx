@@ -8,6 +8,7 @@ import { ScheduleProvider } from "@/contexts/ScheduleContext";
 import { MeetingMinutesProvider } from "@/contexts/MeetingMinutesContext";
 import { TaskProvider } from "@/contexts/TaskContext";
 import { CountdownProvider } from "@/contexts/CountdownContext";
+import { ActivityProvider } from "@/contexts/ActivityContext";
 import { AppShell } from "@/components/Header";
 import CustomCursor from "@/components/CustomCursor";
 
@@ -45,10 +46,12 @@ export default function RootLayout({
                 <MeetingMinutesProvider>
                   <TaskProvider>
                     <CountdownProvider>
-                      <AppShell>
-                        {children}
-                        <CustomCursor />
-                      </AppShell>
+                      <ActivityProvider>
+                        <AppShell>
+                          {children}
+                          <CustomCursor />
+                        </AppShell>
+                      </ActivityProvider>
                     </CountdownProvider>
                   </TaskProvider>
                 </MeetingMinutesProvider>

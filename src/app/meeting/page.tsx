@@ -6,7 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useMeetingMinutes } from "@/contexts/MeetingMinutesContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
 import { PlusIcon, CloseIcon, TrashIcon, EditIcon, ChevronIcon, ExternalLinkIcon, SearchIcon } from "@/components/Icons";
-import type { MeetingMinutes, MeetingLocation } from "@/types";
+import type { MeetingMinutes, MeetingLocation, AgendaItem } from "@/types";
 
 // =============================================
 // 時間オプション（30分刻み）
@@ -53,7 +53,7 @@ export default function MeetingPage() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
   const { minutes, addMinutes, updateMinutes, deleteMinutes, updateAttendance } = useMeetingMinutes();
-  const { staffProfiles } = useSchedule();
+  const { staffProfiles, staffRoles } = useSchedule();
 
   // 現在のユーザーのスタッフプロフィール（最寄駅取得用）
   const myProfile = useMemo(() => {
@@ -94,7 +94,8 @@ export default function MeetingPage() {
       list = list.filter(m =>
         m.title.toLowerCase().includes(q) ||
         m.content.toLowerCase().includes(q) ||
-        m.attendees.some(a => a.toLowerCase().includes(q))
+        m.attendees.some(a => a.toLowerCase().includes(q)) ||
+        (m.agenda ?? []).some(a => a.topic.toLowerCase().includes(q) || (a.roleName ?? "").toLowerCase().includes(q) || (a.personName ?? "").toLowerCase().includes(q))
       );
     }
     return list.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
@@ -229,6 +230,7 @@ export default function MeetingPage() {
         <MeetingModal
           userEmail={user.email}
           staffProfiles={staffProfiles}
+          staffRoles={staffRoles}
           onSave={handleAdd}
           onClose={() => setShowAddModal(false)}
         />
@@ -237,6 +239,7 @@ export default function MeetingPage() {
         <MeetingModal
           userEmail={user.email}
           staffProfiles={staffProfiles}
+          staffRoles={staffRoles}
           initial={editingMinutes}
           onSave={handleUpdate}
           onClose={() => setEditingMinutes(null)}
@@ -343,6 +346,9 @@ function MeetingCard({
             )}
             {m.attendees.length > 0 && (
               <span className="text-xs text-gray-400">出席: {m.attendees.length}名</span>
+            )}
+            {m.agenda && m.agenda.length > 0 && (
+              <span className="text-xs text-indigo-600">アジェンダ{m.agenda.length}件</span>
             )}
             {m.content && (
               <span className="text-xs text-green-600">議事録あり</span>
@@ -451,6 +457,30 @@ function MeetingCard({
               </div>
             )}
 
+            {/* アジェンダ */}
+            {m.agenda && m.agenda.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-2">アジェンダ</p>
+                <ol className="space-y-1.5">
+                  {m.agenda.map((item, idx) => (
+                    <li key={item.id} className="flex items-start gap-2">
+                      <span className="shrink-0 w-5 h-5 flex items-center justify-center text-[10px] font-bold bg-indigo-100 text-indigo-700 rounded-full mt-0.5">{idx + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <span className={`inline-block px-2 py-0.5 text-[10px] rounded-full mr-1.5 ${
+                          item.type === "role"
+                            ? "bg-indigo-100 text-indigo-700"
+                            : "bg-blue-100 text-blue-700"
+                        }`}>
+                          {item.type === "role" ? item.roleName : item.personName}
+                        </span>
+                        <span className="text-sm text-gray-700 dark:text-gray-300">{item.topic}</span>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
             {/* 3. 区切り線 + 議事録（折りたたみ） */}
             <div className="border-t border-gray-200 dark:border-gray-600 pt-3">
               <button
@@ -510,12 +540,14 @@ function MeetingCard({
 function MeetingModal({
   userEmail,
   staffProfiles,
+  staffRoles,
   initial,
   onSave,
   onClose,
 }: {
   userEmail: string;
   staffProfiles: { id: string; email: string; lastName: string; fullName?: string }[];
+  staffRoles: { id: string; name: string }[];
   initial?: MeetingMinutes;
   onSave: (data: Omit<MeetingMinutes, "id" | "createdAt" | "updatedAt">) => void;
   onClose: () => void;
@@ -536,8 +568,32 @@ function MeetingModal({
   const [venue, setVenue] = useState(initial?.venue ?? "");
   const [venueStation, setVenueStation] = useState(initial?.venueStation ?? "");
   const [selectedAttendees, setSelectedAttendees] = useState<string[]>(initial?.attendees ?? []);
+  const [agenda, setAgenda] = useState<AgendaItem[]>(initial?.agenda ?? []);
+  const [newAgendaType, setNewAgendaType] = useState<"role" | "individual">("role");
+  const [newAgendaRoleId, setNewAgendaRoleId] = useState("");
+  const [newAgendaPersonEmail, setNewAgendaPersonEmail] = useState("");
+  const [newAgendaTopic, setNewAgendaTopic] = useState("");
   const [content, setContent] = useState(initial?.content ?? "");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const addAgendaItem = () => {
+    if (!newAgendaTopic.trim()) return;
+    if (newAgendaType === "role" && !newAgendaRoleId) return;
+    if (newAgendaType === "individual" && !newAgendaPersonEmail) return;
+    const role = staffRoles.find(r => r.id === newAgendaRoleId);
+    const person = staffProfiles.find(p => p.email === newAgendaPersonEmail);
+    const item: AgendaItem = {
+      id: `agenda-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      type: newAgendaType,
+      roleId: newAgendaType === "role" ? newAgendaRoleId : undefined,
+      roleName: newAgendaType === "role" ? role?.name : undefined,
+      personEmail: newAgendaType === "individual" ? newAgendaPersonEmail : undefined,
+      personName: newAgendaType === "individual" ? (person?.fullName || person?.lastName) : undefined,
+      topic: newAgendaTopic.trim(),
+    };
+    setAgenda(prev => [...prev, item]);
+    setNewAgendaTopic("");
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -570,6 +626,7 @@ function MeetingModal({
       venue: venue.trim() || undefined,
       venueStation: venueStation.trim() || undefined,
       attendees: selectedAttendees,
+      agenda: agenda.length > 0 ? agenda : undefined,
       content,
       createdBy: initial?.createdBy ?? userEmail,
     });
@@ -733,6 +790,108 @@ function MeetingModal({
             {selectedAttendees.length > 0 && (
               <p className="text-xs text-gray-400 mt-1">{selectedAttendees.length}名選択中</p>
             )}
+          </div>
+
+          {/* Agenda */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">アジェンダ</label>
+
+            {/* Existing agenda items */}
+            {agenda.length > 0 && (
+              <ol className="space-y-1.5 mb-3">
+                {agenda.map((item, idx) => (
+                  <li key={item.id} className="flex items-start gap-2 p-2 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <span className="shrink-0 w-5 h-5 flex items-center justify-center text-[10px] font-bold bg-indigo-100 text-indigo-700 rounded-full mt-0.5">{idx + 1}</span>
+                    <span className={`shrink-0 px-2 py-0.5 text-[10px] rounded-full ${
+                      item.type === "role" ? "bg-indigo-100 text-indigo-700" : "bg-blue-100 text-blue-700"
+                    }`}>
+                      {item.type === "role" ? item.roleName : item.personName}
+                    </span>
+                    <span className="flex-1 text-sm text-gray-700 dark:text-gray-300">{item.topic}</span>
+                    <button
+                      type="button"
+                      onClick={() => setAgenda(prev => prev.filter((_, i) => i !== idx))}
+                      className="shrink-0 p-0.5 text-gray-400 hover:text-red-600 transition-colors"
+                    >
+                      <CloseIcon className="w-3.5 h-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            )}
+
+            {/* Add new agenda item */}
+            <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-3 space-y-2">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNewAgendaType("role")}
+                  className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                    newAgendaType === "role"
+                      ? "bg-indigo-50 text-indigo-700 border-indigo-300"
+                      : "text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  }`}
+                >
+                  ロールから
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewAgendaType("individual")}
+                  className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                    newAgendaType === "individual"
+                      ? "bg-blue-50 text-blue-700 border-blue-300"
+                      : "text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  }`}
+                >
+                  個人から
+                </button>
+              </div>
+              {newAgendaType === "role" ? (
+                <select
+                  value={newAgendaRoleId}
+                  onChange={e => setNewAgendaRoleId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">ロールを選択</option>
+                  {staffRoles.map(r => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <select
+                  value={newAgendaPersonEmail}
+                  onChange={e => setNewAgendaPersonEmail(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">メンバーを選択</option>
+                  {staffProfiles.map(p => (
+                    <option key={p.id} value={p.email}>{p.fullName || p.lastName}</option>
+                  ))}
+                </select>
+              )}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newAgendaTopic}
+                  onChange={e => setNewAgendaTopic(e.target.value)}
+                  placeholder="アジェンダ内容を入力..."
+                  className="flex-1 px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addAgendaItem(); } }}
+                />
+                <button
+                  type="button"
+                  onClick={addAgendaItem}
+                  disabled={
+                    !newAgendaTopic.trim() ||
+                    (newAgendaType === "role" && !newAgendaRoleId) ||
+                    (newAgendaType === "individual" && !newAgendaPersonEmail)
+                  }
+                  className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <PlusIcon className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Content */}

@@ -5,14 +5,15 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useData } from "@/contexts/DataContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
-import { ExternalLinkIcon } from "@/components/Icons";
+import { ExternalLinkIcon, PlusIcon, CloseIcon } from "@/components/Icons";
 
 export default function NewsPage() {
   const { user, isLoading, isAdmin } = useAuth();
-  const { announcements, announcementCategories } = useData();
+  const { announcements, announcementCategories, addAnnouncement, deleteAnnouncement } = useData();
   const { staffProfiles, staffRoles } = useSchedule();
   const router = useRouter();
   const [activeCategory, setActiveCategory] = useState<string>("all");
+  const [showAddModal, setShowAddModal] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !user) router.push("/");
@@ -113,9 +114,18 @@ export default function NewsPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
-      <div className="mb-5">
-        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-1">お知らせ</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400">支部からのお知らせ一覧</p>
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-1">お知らせ</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">支部からのお知らせ一覧</p>
+        </div>
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          <PlusIcon className="w-4 h-4" />
+          投稿する
+        </button>
       </div>
 
       {/* Category filter tabs */}
@@ -220,12 +230,184 @@ export default function NewsPage() {
                   {ann.expiresAt && (
                     <span>掲載期間: 〜{ann.expiresAt}</span>
                   )}
+                  {(ann.createdBy === user.email || isAdmin) && (
+                    <button
+                      onClick={() => {
+                        if (confirm("このお知らせを削除しますか？")) deleteAnnouncement(ann.id);
+                      }}
+                      className="text-red-400 hover:text-red-600 transition-colors ml-auto"
+                    >
+                      削除
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      {/* 削除ボタン（自分が投稿したもの or 管理者） */}
+
+      {/* Add Announcement Modal */}
+      {showAddModal && (
+        <AddAnnouncementModal
+          userEmail={user.email}
+          categories={sortedCategories}
+          staffProfiles={staffProfiles}
+          staffRoles={staffRoles}
+          onSave={async (data) => {
+            await addAnnouncement(data);
+            setShowAddModal(false);
+          }}
+          onClose={() => setShowAddModal(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// =============================================
+// お知らせ投稿モーダル
+// =============================================
+
+function AddAnnouncementModal({
+  userEmail,
+  categories,
+  staffProfiles,
+  staffRoles,
+  onSave,
+  onClose,
+}: {
+  userEmail: string;
+  categories: { id: string; name: string }[];
+  staffProfiles: { email: string; lastName: string; fullName?: string; roleIds?: string[] }[];
+  staffRoles: { id: string; name: string; order: number }[];
+  onSave: (data: { title: string; content: string; date: string; pinned: boolean; category?: string; targetType?: "all" | "select" | "role"; targetEmails?: string[]; expiresAt?: string; url?: string; createdBy: string }) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [category, setCategory] = useState("");
+  const [url, setUrl] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [onClose]);
+
+  const handleSubmit = async () => {
+    if (!title.trim()) return;
+    setSaving(true);
+    await onSave({
+      title: title.trim(),
+      content: content.trim(),
+      date: new Date().toISOString().split("T")[0],
+      pinned: false,
+      category: category || undefined,
+      targetType: "all",
+      expiresAt: expiresAt || undefined,
+      url: url.trim() || undefined,
+      createdBy: userEmail,
+    });
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100">お知らせを投稿</h3>
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
+            <CloseIcon className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-5 space-y-4">
+          {/* Title */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">タイトル <span className="text-red-500">*</span></label>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="お知らせのタイトル"
+              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Content */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">内容</label>
+            <textarea
+              value={content}
+              onChange={e => setContent(e.target.value)}
+              rows={4}
+              placeholder="お知らせの詳細..."
+              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+            />
+          </div>
+
+          {/* Category */}
+          {categories.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">カテゴリ</label>
+              <select
+                value={category}
+                onChange={e => setCategory(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">なし</option>
+                {categories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* URL */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">関連URL（任意）</label>
+            <input
+              type="url"
+              value={url}
+              onChange={e => setUrl(e.target.value)}
+              placeholder="https://..."
+              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Expires */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">掲載期限（任意）</label>
+            <input
+              type="date"
+              value={expiresAt}
+              onChange={e => setExpiresAt(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Buttons */}
+          <div className="flex gap-2 pt-2">
+            <button
+              onClick={onClose}
+              className="flex-1 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              キャンセル
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={!title.trim() || saving}
+              className="flex-1 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? "投稿中..." : "投稿"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

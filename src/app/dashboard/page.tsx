@@ -104,13 +104,8 @@ export default function DashboardPage() {
   const { minutes } = useMeetingMinutes();
   const { staffProfiles, timeSlots } = useSchedule();
   const { tasks } = useTask();
-  const { countdowns, addCountdown, deleteCountdown } = useCountdown();
+  const { countdowns } = useCountdown();
   const router = useRouter();
-
-  // カウントダウン追加フォーム
-  const [showCountdownForm, setShowCountdownForm] = useState(false);
-  const [newCountdownTitle, setNewCountdownTitle] = useState("");
-  const [newCountdownDate, setNewCountdownDate] = useState("");
 
   // =============================================
   // ダッシュボードカスタマイズ
@@ -135,17 +130,16 @@ export default function DashboardPage() {
   });
   const [showCustomizeModal, setShowCustomizeModal] = useState(false);
 
-  // ESCキーでカスタマイズモーダル / カウントダウンフォームを閉じる
+  // ESCキーでカスタマイズモーダルを閉じる
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (showCustomizeModal) setShowCustomizeModal(false);
-        if (showCountdownForm) { setShowCountdownForm(false); setNewCountdownTitle(""); setNewCountdownDate(""); }
       }
     };
     document.addEventListener("keydown", handleEsc);
     return () => document.removeEventListener("keydown", handleEsc);
-  }, [showCustomizeModal, showCountdownForm]);
+  }, [showCustomizeModal]);
 
   // localStorageから読み込み
   useEffect(() => {
@@ -387,17 +381,6 @@ export default function DashboardPage() {
     purple: "bg-purple-100 dark:bg-purple-900/50",
   };
 
-  function handleAddCountdown() {
-    if (!newCountdownTitle.trim() || !newCountdownDate) return;
-    addCountdown({
-      title: newCountdownTitle.trim(),
-      targetDate: newCountdownDate,
-      createdBy: user!.email,
-    });
-    setNewCountdownTitle("");
-    setNewCountdownDate("");
-    setShowCountdownForm(false);
-  }
 
   return (
       <div className="max-w-5xl mx-auto px-4 py-6">
@@ -473,15 +456,6 @@ export default function DashboardPage() {
                   </div>
                 ))}
               </div>
-              <a
-                href="https://www.google.com/search?q=%E6%9D%B1%E4%BA%AC+%E5%A4%A9%E6%B0%97"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 text-xs text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 mt-1.5 transition-colors"
-              >
-                <span>詳しく見る</span>
-                <ExternalLinkIcon className="w-3 h-3" />
-              </a>
             </div>
           )}
           {widgetVisibility.weather && weatherError && !weather && (
@@ -705,50 +679,7 @@ export default function DashboardPage() {
             <div className="flex items-center gap-2 mb-3">
               <span className="text-base">{"\u23F3"}</span>
               <h2 className="font-semibold text-gray-900 dark:text-gray-100 text-sm">カウントダウン</h2>
-              {isAdmin && (
-                <button
-                  onClick={() => setShowCountdownForm(v => !v)}
-                  className="ml-auto w-7 h-7 flex items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors text-lg font-bold leading-none"
-                  title="カウントダウンを追加"
-                >
-                  +
-                </button>
-              )}
             </div>
-            {showCountdownForm && isAdmin && (
-              <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-600 p-4 mb-3">
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    placeholder="タイトル（例: 来期スタート）"
-                    value={newCountdownTitle}
-                    onChange={e => setNewCountdownTitle(e.target.value)}
-                    className="flex-1 px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <input
-                    type="date"
-                    value={newCountdownDate}
-                    onChange={e => setNewCountdownDate(e.target.value)}
-                    className="px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleAddCountdown}
-                      disabled={!newCountdownTitle.trim() || !newCountdownDate}
-                      className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      追加
-                    </button>
-                    <button
-                      onClick={() => { setShowCountdownForm(false); setNewCountdownTitle(""); setNewCountdownDate(""); }}
-                      className="px-4 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                    >
-                      キャンセル
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {[...countdowns].sort((a, b) => a.targetDate.localeCompare(b.targetDate)).map(cd => {
                 const { text, isToday, isPast } = getCountdownText(cd.targetDate);
@@ -763,9 +694,8 @@ export default function DashboardPage() {
                         : "bg-gradient-to-br from-violet-50 to-blue-50 dark:from-violet-900/20 dark:to-blue-900/20 border-violet-200 dark:border-violet-700"
                     }`}
                   >
-                    {isAdmin && (
+                    {false && (
                       <button
-                        onClick={() => deleteCountdown(cd.id)}
                         className="absolute top-2 right-2 w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors text-xs"
                         title="削除"
                       >
@@ -788,57 +718,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* カウントダウンが0件のとき管理者用追加ボタン */}
-        {widgetVisibility.countdown && countdowns.length === 0 && isAdmin && (
-          <div className="mb-6">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-base">{"\u23F3"}</span>
-              <h2 className="font-semibold text-gray-900 dark:text-gray-100 text-sm">カウントダウン</h2>
-              <button
-                onClick={() => setShowCountdownForm(v => !v)}
-                className="ml-auto w-7 h-7 flex items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors text-lg font-bold leading-none"
-                title="カウントダウンを追加"
-              >
-                +
-              </button>
-            </div>
-            {showCountdownForm && (
-              <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-600 p-4 mb-3">
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    placeholder="タイトル（例: 来期スタート）"
-                    value={newCountdownTitle}
-                    onChange={e => setNewCountdownTitle(e.target.value)}
-                    className="flex-1 px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <input
-                    type="date"
-                    value={newCountdownDate}
-                    onChange={e => setNewCountdownDate(e.target.value)}
-                    className="px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleAddCountdown}
-                      disabled={!newCountdownTitle.trim() || !newCountdownDate}
-                      className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      追加
-                    </button>
-                    <button
-                      onClick={() => { setShowCountdownForm(false); setNewCountdownTitle(""); setNewCountdownDate(""); }}
-                      className="px-4 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                    >
-                      キャンセル
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-            <p className="text-sm text-gray-400 dark:text-gray-500">カウントダウンはまだ登録されていません</p>
-          </div>
-        )}
 
         {/* Upcoming Orientations */}
         {widgetVisibility.orientationSchedule && orientationByDate.length > 0 && (

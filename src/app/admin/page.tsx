@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useData } from "@/contexts/DataContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
+import { useCountdown } from "@/contexts/CountdownContext";
 import Toast from "@/components/Toast";
 import { LinkIcon, PlusIcon, TrashIcon, EditIcon, CloseIcon } from "@/components/Icons";
 import type { LinkItem, LinkIconType, AccountInfo, Announcement, AnnouncementCategory } from "@/types";
 
-type Tab = "links" | "categories" | "accounts" | "users" | "roles" | "announcements" | "announcementCategories";
+type Tab = "links" | "categories" | "accounts" | "users" | "roles" | "announcements" | "announcementCategories" | "countdowns";
 
 export default function AdminPage() {
   const { user, isLoading, isAdmin, allowedEmails, adminEmails, addAllowedEmail, removeAllowedEmail, addAdminEmail, removeAdminEmail } = useAuth();
@@ -63,6 +64,29 @@ export default function AdminPage() {
   const [newRoleName, setNewRoleName] = useState("");
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
   const [editingRoleName, setEditingRoleName] = useState("");
+
+  // Countdown
+  const { countdowns, addCountdown, deleteCountdown } = useCountdown();
+  const [newCountdownTitle, setNewCountdownTitle] = useState("");
+  const [newCountdownDate, setNewCountdownDate] = useState("");
+
+  // Drag-and-drop reorder refs
+  const dragItem = useRef<number | null>(null);
+  const dragOverItem = useRef<number | null>(null);
+
+  const handleDrop = <T extends { id: string; order: number }>(
+    items: T[],
+    updateFn: (id: string, updates: { order: number }) => void | Promise<void>
+  ) => {
+    if (dragItem.current === null || dragOverItem.current === null) return;
+    if (dragItem.current === dragOverItem.current) return;
+    const newItems = [...items];
+    const dragged = newItems.splice(dragItem.current, 1)[0];
+    newItems.splice(dragOverItem.current, 0, dragged);
+    newItems.forEach((item, i) => updateFn(item.id, { order: i + 1 }));
+    dragItem.current = null;
+    dragOverItem.current = null;
+  };
 
   useEffect(() => {
     if (!isLoading && (!user || !isAdmin)) router.push("/dashboard");
@@ -294,6 +318,7 @@ export default function AdminPage() {
     { id: "announcementCategories", label: "お知らせカテゴリ" },
     { id: "users", label: "ユーザー管理" },
     { id: "roles", label: "ロール管理" },
+    { id: "countdowns", label: "カウントダウン" },
   ];
 
   const iconOptions: { value: LinkIconType; label: string }[] = [
@@ -316,28 +341,34 @@ export default function AdminPage() {
           <p className="text-sm text-gray-500 dark:text-gray-400">リンク・カテゴリ・アカウント情報を管理できます</p>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-1 mb-6 overflow-x-auto scrollbar-none">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`shrink-0 flex-1 py-2 px-2 text-xs sm:text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
-                activeTab === tab.id
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        <div className="flex flex-col md:flex-row gap-6">
+          {/* Sidebar tabs (desktop) / Horizontal tabs (mobile) */}
+          <div className="md:w-48 shrink-0">
+            <div className="flex md:flex-col gap-1 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-1 overflow-x-auto md:overflow-x-visible scrollbar-none">
+              {tabs.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`shrink-0 py-2 px-3 text-xs sm:text-sm font-medium rounded-md transition-colors whitespace-nowrap text-left ${
+                    activeTab === tab.id
+                      ? "bg-blue-600 text-white"
+                      : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Content area */}
+          <div className="flex-1 min-w-0">
 
         {/* Links tab */}
         {activeTab === "links" && (
           <div>
             <div className="flex justify-between items-center mb-4">
-              <p className="text-sm text-gray-500">{links.length}件のリンク</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{links.length}件のリンク</p>
               <button onClick={() => openLinkForm()} className="flex items-center gap-1.5 bg-blue-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors">
                 <PlusIcon className="w-4 h-4" /> 新規追加
               </button>
@@ -348,21 +379,32 @@ export default function AdminPage() {
                 if (catLinks.length === 0) return null;
                 return (
                   <div key={cat.id}>
-                    <div className="px-4 py-2 bg-gray-50/50">
-                      <span className="text-xs font-medium text-gray-500">{cat.name}</span>
+                    <div className="px-4 py-2 bg-gray-50/50 dark:bg-gray-700/30">
+                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">{cat.name}</span>
                     </div>
-                    {catLinks.map(link => (
-                      <div key={link.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50/50">
+                    {catLinks.map((link, idx) => (
+                      <div
+                        key={link.id}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50/50 dark:hover:bg-gray-700/50"
+                        draggable
+                        onDragStart={() => { dragItem.current = idx; }}
+                        onDragOver={(e) => { e.preventDefault(); dragOverItem.current = idx; }}
+                        onDrop={() => handleDrop(catLinks, updateLink)}
+                        onDragEnd={() => { dragItem.current = null; dragOverItem.current = null; }}
+                      >
+                        <div className="cursor-grab active:cursor-grabbing shrink-0 text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors">
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+                        </div>
                         <LinkIcon type={link.icon} className="w-4 h-4 text-gray-400 shrink-0" />
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm text-gray-900 truncate">{link.title}</p>
+                          <p className="text-sm text-gray-900 dark:text-gray-100 truncate">{link.title}</p>
                           <p className="text-xs text-gray-400 truncate">{link.url}</p>
                         </div>
                         <div className="flex gap-1 shrink-0">
-                          <button onClick={() => openLinkForm(link)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
+                          <button onClick={() => openLinkForm(link)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors">
                             <EditIcon />
                           </button>
-                          <button onClick={() => handleDeleteLink(link.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors">
+                          <button onClick={() => handleDeleteLink(link.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors">
                             <TrashIcon />
                           </button>
                         </div>
@@ -379,25 +421,35 @@ export default function AdminPage() {
         {activeTab === "categories" && (
           <div>
             <div className="flex justify-between items-center mb-4">
-              <p className="text-sm text-gray-500">{categories.length}件のカテゴリ</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{categories.length}件のカテゴリ</p>
               <button onClick={() => openCatForm()} className="flex items-center gap-1.5 bg-blue-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors">
                 <PlusIcon className="w-4 h-4" /> 新規追加
               </button>
             </div>
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-700">
-              {sortedCategories.map(cat => (
-                <div key={cat.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50">
+              {sortedCategories.map((cat, idx) => (
+                <div
+                  key={cat.id}
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 dark:hover:bg-gray-700/50"
+                  draggable
+                  onDragStart={() => { dragItem.current = idx; }}
+                  onDragOver={(e) => { e.preventDefault(); dragOverItem.current = idx; }}
+                  onDrop={() => handleDrop(sortedCategories, updateCategory)}
+                  onDragEnd={() => { dragItem.current = null; dragOverItem.current = null; }}
+                >
+                  <div className="cursor-grab active:cursor-grabbing shrink-0 text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+                  </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{cat.name}</p>
                     {cat.description && <p className="text-xs text-gray-400">{cat.description}</p>}
-                    <p className="text-xs text-gray-300">リンク数: {links.filter(l => l.category === cat.id).length}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500">リンク数: {links.filter(l => l.category === cat.id).length}</p>
                   </div>
-                  <span className="text-xs text-gray-300 shrink-0">順番: {cat.order}</span>
                   <div className="flex gap-1 shrink-0">
-                    <button onClick={() => openCatForm(cat)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
+                    <button onClick={() => openCatForm(cat)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors">
                       <EditIcon />
                     </button>
-                    <button onClick={() => handleDeleteCat(cat.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors">
+                    <button onClick={() => handleDeleteCat(cat.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors">
                       <TrashIcon />
                     </button>
                   </div>
@@ -411,28 +463,39 @@ export default function AdminPage() {
         {activeTab === "accounts" && (
           <div>
             <div className="flex justify-between items-center mb-4">
-              <p className="text-sm text-gray-500">{accounts.length}件のアカウント</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{accounts.length}件のアカウント</p>
               <button onClick={() => openAccForm()} className="flex items-center gap-1.5 bg-blue-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors">
                 <PlusIcon className="w-4 h-4" /> 新規追加
               </button>
             </div>
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-700">
-              {[...accounts].sort((a, b) => a.order - b.order).map(acc => (
-                <div key={acc.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50">
+              {(() => { const sortedAccounts = [...accounts].sort((a, b) => a.order - b.order); return sortedAccounts.map((acc, idx) => (
+                <div
+                  key={acc.id}
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 dark:hover:bg-gray-700/50"
+                  draggable
+                  onDragStart={() => { dragItem.current = idx; }}
+                  onDragOver={(e) => { e.preventDefault(); dragOverItem.current = idx; }}
+                  onDrop={() => handleDrop(sortedAccounts, updateAccount)}
+                  onDragEnd={() => { dragItem.current = null; dragOverItem.current = null; }}
+                >
+                  <div className="cursor-grab active:cursor-grabbing shrink-0 text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+                  </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{acc.serviceName}</p>
                     <p className="text-xs text-gray-400">{acc.loginId}</p>
                   </div>
                   <div className="flex gap-1 shrink-0">
-                    <button onClick={() => openAccForm(acc)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
+                    <button onClick={() => openAccForm(acc)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors">
                       <EditIcon />
                     </button>
-                    <button onClick={() => handleDeleteAcc(acc.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors">
+                    <button onClick={() => handleDeleteAcc(acc.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors">
                       <TrashIcon />
                     </button>
                   </div>
                 </div>
-              ))}
+              )); })()}
             </div>
           </div>
         )}
@@ -440,14 +503,14 @@ export default function AdminPage() {
         {activeTab === "announcements" && (
           <div>
             <div className="flex justify-between items-center mb-4">
-              <p className="text-sm text-gray-500">{announcements.length}件のお知らせ</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{announcements.length}件のお知らせ</p>
               <button onClick={() => openAnnForm()} className="flex items-center gap-1.5 bg-blue-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors">
                 <PlusIcon className="w-4 h-4" /> 新規追加
               </button>
             </div>
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-700">
               {[...announcements].sort((a, b) => b.date.localeCompare(a.date)).map(ann => (
-                <div key={ann.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50">
+                <div key={ann.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 dark:hover:bg-gray-700/50">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{ann.title}</p>
@@ -458,10 +521,10 @@ export default function AdminPage() {
                     <p className="text-xs text-gray-400 truncate">{ann.date} - {ann.content}</p>
                   </div>
                   <div className="flex gap-1 shrink-0">
-                    <button onClick={() => openAnnForm(ann)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
+                    <button onClick={() => openAnnForm(ann)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors">
                       <EditIcon />
                     </button>
-                    <button onClick={() => handleDeleteAnn(ann.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors">
+                    <button onClick={() => handleDeleteAnn(ann.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors">
                       <TrashIcon />
                     </button>
                   </div>
@@ -477,7 +540,7 @@ export default function AdminPage() {
             {/* 管理者一覧 */}
             <div>
               <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">管理者アカウント</h3>
-              <p className="text-xs text-gray-500 mb-3">管理者はリンク・カテゴリ・アカウント情報・ユーザーの管理ができます。</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">管理者はリンク・カテゴリ・アカウント情報・ユーザーの管理ができます。</p>
               <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-700">
                 {adminEmails.map(email => (
                   <div key={email} className="flex items-center gap-3 px-4 py-3">
@@ -487,7 +550,7 @@ export default function AdminPage() {
                       </span>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-900 truncate">{email}</p>
+                      <p className="text-sm text-gray-900 dark:text-gray-100 truncate">{email}</p>
                       <p className="text-xs text-purple-600">管理者</p>
                     </div>
                     <button
@@ -497,7 +560,7 @@ export default function AdminPage() {
                           setToast("管理者を削除しました");
                         }
                       }}
-                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors shrink-0"
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors shrink-0"
                     >
                       <TrashIcon />
                     </button>
@@ -525,7 +588,7 @@ export default function AdminPage() {
             {/* 許可メールアドレス一覧 */}
             <div>
               <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">許可メールアドレス（個別追加）</h3>
-              <p className="text-xs text-gray-500 mb-3">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
                 @dot-jp.or.jp ドメインのアカウントは全員ログインできます。それに加えて、個別にメールアドレスを許可したい場合に使います。
               </p>
 
@@ -538,7 +601,7 @@ export default function AdminPage() {
                           {email.charAt(0).toUpperCase()}
                         </span>
                       </div>
-                      <p className="flex-1 text-sm text-gray-900 truncate">{email}</p>
+                      <p className="flex-1 text-sm text-gray-900 dark:text-gray-100 truncate">{email}</p>
                       <button
                         onClick={() => {
                           if (confirm(`${email} を許可リストから削除しますか？`)) {
@@ -551,7 +614,7 @@ export default function AdminPage() {
                             setToast("メールアドレスを削除しました");
                           }
                         }}
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors shrink-0"
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors shrink-0"
                       >
                         <TrashIcon />
                       </button>
@@ -645,14 +708,14 @@ export default function AdminPage() {
             </div>
 
             {/* セキュリティ情報 */}
-            <div className="bg-gray-50 rounded-xl border border-gray-200 p-4">
-              <h3 className="text-xs font-semibold text-gray-700 mb-2">セキュリティについて</h3>
-              <ul className="text-xs text-gray-500 space-y-1">
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-600 p-4">
+              <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">セキュリティについて</h3>
+              <ul className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
                 <li>• ログインは @dot-jp.or.jp ドメインの Google アカウントに限定されます</li>
                 <li>• Google OAuth の hd パラメータでドメインを検証します</li>
                 <li>• Google Cloud Console の OAuth クライアントID 設定が必要です（無料）</li>
-                <li>• Firebase は使用しません — 静的ホスティング（GitHub Pages）で運用可能です</li>
-                <li>• データは各ユーザーのブラウザ（localStorage）に保存されます</li>
+                <li>• データは Firebase Firestore にリアルタイム同期されます</li>
+                <li>• Firestore セキュリティルールの設定を忘れずに行ってください</li>
               </ul>
             </div>
           </div>
@@ -663,14 +726,22 @@ export default function AdminPage() {
           <div className="space-y-6">
             <div>
               <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">ロール一覧（役職・部署）</h3>
-              <p className="text-xs text-gray-500 mb-3">
-                スタッフに割り当てるロールを管理します。各スタッフは「スケジュール &gt; スタッフ設定」からロールを選択できます。
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                スタッフに割り当てるロールを管理します。各スタッフはマイページからロールを選択できます。
               </p>
 
               {staffRoles.length > 0 ? (
                 <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-700">
-                  {[...staffRoles].sort((a, b) => a.order - b.order).map(role => (
-                    <div key={role.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50">
+                  {(() => { const sortedRoles = [...staffRoles].sort((a, b) => a.order - b.order); return sortedRoles.map((role, idx) => (
+                    <div
+                      key={role.id}
+                      className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 dark:hover:bg-gray-700/50"
+                      draggable={editingRoleId !== role.id}
+                      onDragStart={() => { if (editingRoleId !== role.id) dragItem.current = idx; }}
+                      onDragOver={(e) => { e.preventDefault(); dragOverItem.current = idx; }}
+                      onDrop={() => handleDrop(sortedRoles, updateStaffRole)}
+                      onDragEnd={() => { dragItem.current = null; dragOverItem.current = null; }}
+                    >
                       {editingRoleId === role.id ? (
                         <>
                           <input
@@ -696,32 +767,34 @@ export default function AdminPage() {
                                 setToast("ロールを更新しました");
                               }
                             }}
-                            className="p-1.5 text-green-600 hover:bg-green-50 rounded transition-colors"
+                            className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded transition-colors"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="20,6 9,17 4,12" strokeWidth="2" /></svg>
                           </button>
                           <button
                             onClick={() => setEditingRoleId(null)}
-                            className="p-1.5 text-gray-400 hover:bg-gray-100 rounded transition-colors"
+                            className="p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
                           >
                             <CloseIcon className="w-4 h-4" />
                           </button>
                         </>
                       ) : (
                         <>
-                          <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center shrink-0">
-                            <span className="text-indigo-700 text-xs font-medium">
+                          <div className="cursor-grab active:cursor-grabbing shrink-0 text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors">
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+                          </div>
+                          <div className="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/50 rounded-full flex items-center justify-center shrink-0">
+                            <span className="text-indigo-700 dark:text-indigo-300 text-xs font-medium">
                               {role.name.charAt(0)}
                             </span>
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm text-gray-900">{role.name}</p>
+                            <p className="text-sm text-gray-900 dark:text-gray-100">{role.name}</p>
                           </div>
-                          <span className="text-xs text-gray-300 shrink-0">#{role.order}</span>
                           <div className="flex gap-1 shrink-0">
                             <button
                               onClick={() => { setEditingRoleId(role.id); setEditingRoleName(role.name); }}
-                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
                             >
                               <EditIcon />
                             </button>
@@ -732,7 +805,7 @@ export default function AdminPage() {
                                   setToast("ロールを削除しました");
                                 }
                               }}
-                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
                             >
                               <TrashIcon />
                             </button>
@@ -740,7 +813,7 @@ export default function AdminPage() {
                         </>
                       )}
                     </div>
-                  ))}
+                  )); })()}
                 </div>
               ) : (
                 <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-6 text-center">
@@ -785,12 +858,20 @@ export default function AdminPage() {
           <div className="space-y-6">
             <div>
               <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">お知らせカテゴリ一覧</h3>
-              <p className="text-xs text-gray-500 mb-3">お知らせに設定するカテゴリを管理します。</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">お知らせに設定するカテゴリを管理します。</p>
 
               {announcementCategories.length > 0 ? (
                 <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-700">
-                  {[...announcementCategories].sort((a, b) => a.order - b.order).map(cat => (
-                    <div key={cat.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 dark:hover:bg-gray-700/50">
+                  {(() => { const sortedAnnCats = [...announcementCategories].sort((a, b) => a.order - b.order); return sortedAnnCats.map((cat, idx) => (
+                    <div
+                      key={cat.id}
+                      className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 dark:hover:bg-gray-700/50"
+                      draggable={editingAnnCatId !== cat.id}
+                      onDragStart={() => { if (editingAnnCatId !== cat.id) dragItem.current = idx; }}
+                      onDragOver={(e) => { e.preventDefault(); dragOverItem.current = idx; }}
+                      onDrop={() => handleDrop(sortedAnnCats, updateAnnouncementCategory)}
+                      onDragEnd={() => { dragItem.current = null; dragOverItem.current = null; }}
+                    >
                       {editingAnnCatId === cat.id ? (
                         <>
                           <input
@@ -816,27 +897,29 @@ export default function AdminPage() {
                                 setToast("カテゴリを更新しました");
                               }
                             }}
-                            className="p-1.5 text-green-600 hover:bg-green-50 rounded transition-colors"
+                            className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded transition-colors"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="20,6 9,17 4,12" strokeWidth="2" /></svg>
                           </button>
                           <button
                             onClick={() => setEditingAnnCatId(null)}
-                            className="p-1.5 text-gray-400 hover:bg-gray-100 rounded transition-colors"
+                            className="p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
                           >
                             <CloseIcon className="w-4 h-4" />
                           </button>
                         </>
                       ) : (
                         <>
+                          <div className="cursor-grab active:cursor-grabbing shrink-0 text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors">
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+                          </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm text-gray-900 dark:text-gray-100">{cat.name}</p>
                           </div>
-                          <span className="text-xs text-gray-300 dark:text-gray-600 shrink-0">#{cat.order}</span>
                           <div className="flex gap-1 shrink-0">
                             <button
                               onClick={() => { setEditingAnnCatId(cat.id); setEditingAnnCatName(cat.name); }}
-                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
                             >
                               <EditIcon />
                             </button>
@@ -847,7 +930,7 @@ export default function AdminPage() {
                                   setToast("カテゴリを削除しました");
                                 }
                               }}
-                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
                             >
                               <TrashIcon />
                             </button>
@@ -855,7 +938,7 @@ export default function AdminPage() {
                         </>
                       )}
                     </div>
-                  ))}
+                  )); })()}
                 </div>
               ) : (
                 <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-6 text-center">
@@ -894,6 +977,54 @@ export default function AdminPage() {
             </div>
           </div>
         )}
+
+        {/* Countdowns tab */}
+        {activeTab === "countdowns" && (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">カウントダウン管理</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">ダッシュボードに表示されるカウントダウンイベントを管理します。</p>
+              {countdowns.length > 0 ? (
+                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-700">
+                  {[...countdowns].sort((a, b) => a.targetDate.localeCompare(b.targetDate)).map(item => {
+                    const days = Math.ceil((new Date(item.targetDate + "T00:00:00").getTime() - new Date().setHours(0,0,0,0)) / 86400000);
+                    return (
+                      <div key={item.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 dark:hover:bg-gray-700/50">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{item.title}</p>
+                          <p className="text-xs text-gray-400">{item.targetDate} ({days > 0 ? `あと${days}日` : days === 0 ? "今日" : `${Math.abs(days)}日前`})</p>
+                        </div>
+                        <button
+                          onClick={() => { if (confirm(`「${item.title}」を削除しますか？`)) { deleteCountdown(item.id); setToast("カウントダウンを削除しました"); } }}
+                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors shrink-0"
+                        >
+                          <TrashIcon />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-6 text-center">
+                  <p className="text-sm text-gray-400">カウントダウンがありません</p>
+                </div>
+              )}
+              <div className="flex gap-2 mt-3">
+                <input type="text" value={newCountdownTitle} onChange={e => setNewCountdownTitle(e.target.value)} placeholder="イベント名" className="flex-1 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                <input type="date" value={newCountdownDate} onChange={e => setNewCountdownDate(e.target.value)} className="border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                <button
+                  onClick={() => { if (newCountdownTitle.trim() && newCountdownDate) { addCountdown({ title: newCountdownTitle.trim(), targetDate: newCountdownDate, createdBy: user?.email || "" }); setNewCountdownTitle(""); setNewCountdownDate(""); setToast("カウントダウンを追加しました"); } }}
+                  className="flex items-center gap-1.5 bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shrink-0"
+                >
+                  <PlusIcon className="w-4 h-4" /> 追加
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+          </div>{/* end content area */}
+        </div>{/* end sidebar layout */}
       </div>
 
       {/* Link Modal */}
@@ -1102,7 +1233,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 function FormField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{label}</label>
       {children}
       <style jsx global>{`
         .form-input {
@@ -1111,10 +1242,21 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
           border-radius: 0.5rem;
           padding: 0.5rem 0.75rem;
           font-size: 0.875rem;
+          background: #ffffff;
+          color: #111827;
           outline: none;
           transition: all 0.15s;
         }
         .form-input:focus {
+          border-color: transparent;
+          box-shadow: 0 0 0 2px #3b82f6;
+        }
+        .dark .form-input {
+          background: #374151;
+          border-color: #4b5563;
+          color: #f3f4f6;
+        }
+        .dark .form-input:focus {
           border-color: transparent;
           box-shadow: 0 0 0 2px #3b82f6;
         }

@@ -4,7 +4,8 @@ import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
-import { SearchIcon } from "@/components/Icons";
+import { SearchIcon, CloseIcon } from "@/components/Icons";
+import type { StaffProfile } from "@/types";
 
 // =============================================
 // バッジカラー（ロールごとに色を割り当て）
@@ -49,10 +50,11 @@ function getAvatarColor(index: number): string {
 // =============================================
 
 export default function MembersPage() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, isAdmin } = useAuth();
   const router = useRouter();
-  const { staffProfiles, staffRoles } = useSchedule();
+  const { staffProfiles, staffRoles, updateStaffProfile } = useSchedule();
   const [search, setSearch] = useState("");
+  const [editingProfile, setEditingProfile] = useState<StaffProfile | null>(null);
 
   useEffect(() => {
     if (!isLoading && !user) router.push("/");
@@ -140,8 +142,21 @@ export default function MembersPage() {
               return (
                 <div
                   key={profile.id}
-                  className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600 transition-all card-hover"
+                  className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600 transition-all card-hover relative"
                 >
+                  {/* 管理者用編集ボタン */}
+                  {isAdmin && (
+                    <button
+                      onClick={() => setEditingProfile(profile)}
+                      className="absolute top-3 right-3 p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                      title="編集"
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                    </button>
+                  )}
                   {/* アバター + 名前 */}
                   <div className="flex items-center gap-3 mb-4">
                     {profile.photoURL ? (
@@ -252,6 +267,175 @@ export default function MembersPage() {
             })}
           </div>
         )}
+      </div>
+
+      {/* 管理者用 編集モーダル */}
+      {editingProfile && (
+        <EditProfileModal
+          profile={editingProfile}
+          staffRoles={staffRoles}
+          onSave={(updates) => {
+            updateStaffProfile(editingProfile.id, updates);
+            setEditingProfile(null);
+          }}
+          onClose={() => setEditingProfile(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// =============================================
+// プロフィール編集モーダル（管理者用）
+// =============================================
+
+function EditProfileModal({
+  profile,
+  staffRoles,
+  onSave,
+  onClose,
+}: {
+  profile: StaffProfile;
+  staffRoles: { id: string; name: string; order: number }[];
+  onSave: (updates: Partial<StaffProfile>) => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [onClose]);
+
+  const [lastName, setLastName] = useState(profile.lastName ?? "");
+  const [firstName, setFirstName] = useState(profile.firstName ?? "");
+  const [furigana, setFurigana] = useState(profile.furigana ?? "");
+  const [grade, setGrade] = useState(profile.grade ?? "");
+  const [gender, setGender] = useState<"male" | "female" | "other">(profile.gender ?? "other");
+  const [roleIds, setRoleIds] = useState<string[]>(profile.roleIds ?? []);
+  const [nearestStation, setNearestStation] = useState(profile.nearestStation ?? "");
+  const [birthday, setBirthday] = useState(profile.birthday ?? "");
+  const [university, setUniversity] = useState(profile.university ?? "");
+  const [faculty, setFaculty] = useState(profile.faculty ?? "");
+
+  const handleSubmit = () => {
+    const fullName = [lastName, firstName].filter(Boolean).join(" ");
+    onSave({ lastName, firstName, fullName, furigana, grade, gender, roleIds, nearestStation, birthday: birthday || undefined, university, faculty });
+  };
+
+  const toggleRole = (id: string) => {
+    setRoleIds(prev => prev.includes(id) ? prev.filter(r => r !== id) : [...prev, id]);
+  };
+
+  const inputCls = "w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const labelCls = "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1";
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+            {profile.fullName || profile.lastName} の情報を編集
+          </h3>
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
+            <CloseIcon className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* メール（表示のみ） */}
+          <div>
+            <label className={labelCls}>メールアドレス（変更不可）</label>
+            <p className="text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 px-3 py-2 rounded-lg">{profile.email}</p>
+          </div>
+
+          {/* 氏名 */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>苗字</label>
+              <input type="text" value={lastName} onChange={e => setLastName(e.target.value)} className={inputCls} placeholder="田中" />
+            </div>
+            <div>
+              <label className={labelCls}>名前</label>
+              <input type="text" value={firstName} onChange={e => setFirstName(e.target.value)} className={inputCls} placeholder="太郎" />
+            </div>
+          </div>
+
+          {/* ふりがな */}
+          <div>
+            <label className={labelCls}>ふりがな</label>
+            <input type="text" value={furigana} onChange={e => setFurigana(e.target.value)} className={inputCls} placeholder="たなかたろう" />
+          </div>
+
+          {/* 学年・性別 */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>学年</label>
+              <input type="text" value={grade} onChange={e => setGrade(e.target.value)} className={inputCls} placeholder="3年" />
+            </div>
+            <div>
+              <label className={labelCls}>性別</label>
+              <select value={gender} onChange={e => setGender(e.target.value as "male" | "female" | "other")} className={inputCls}>
+                <option value="male">男性</option>
+                <option value="female">女性</option>
+                <option value="other">その他</option>
+              </select>
+            </div>
+          </div>
+
+          {/* 大学・学部 */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>大学名</label>
+              <input type="text" value={university} onChange={e => setUniversity(e.target.value)} className={inputCls} placeholder="○○大学" />
+            </div>
+            <div>
+              <label className={labelCls}>学部・学科</label>
+              <input type="text" value={faculty} onChange={e => setFaculty(e.target.value)} className={inputCls} placeholder="経済学部" />
+            </div>
+          </div>
+
+          {/* 最寄駅 */}
+          <div>
+            <label className={labelCls}>最寄駅</label>
+            <input type="text" value={nearestStation} onChange={e => setNearestStation(e.target.value)} className={inputCls} placeholder="渋谷" />
+          </div>
+
+          {/* 生年月日 */}
+          <div>
+            <label className={labelCls}>生年月日</label>
+            <input type="date" value={birthday} onChange={e => setBirthday(e.target.value)} className={inputCls} />
+          </div>
+
+          {/* ロール */}
+          {staffRoles.length > 0 && (
+            <div>
+              <label className={labelCls}>ロール</label>
+              <div className="border border-gray-200 dark:border-gray-600 rounded-lg max-h-40 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
+                {[...staffRoles].sort((a, b) => a.order - b.order).map(role => (
+                  <label key={role.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={roleIds.includes(role.id)}
+                      onChange={() => toggleRole(role.id)}
+                      className="rounded border-gray-300"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{role.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ボタン */}
+          <div className="flex gap-2 pt-2">
+            <button onClick={onClose} className="flex-1 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+              キャンセル
+            </button>
+            <button onClick={handleSubmit} className="flex-1 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+              保存
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

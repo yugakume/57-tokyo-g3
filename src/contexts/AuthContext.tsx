@@ -216,9 +216,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       alert("デモモードが無効です。Googleアカウントでログインしてください。");
       return;
     }
-    const displayName = email.split("@")[0];
-    authenticateUser(email, displayName);
-  }, [authenticateUser]);
+    const domain = email.split("@")[1];
+    if (domain !== ALLOWED_DOMAIN) {
+      alert(`@${ALLOWED_DOMAIN} ドメインのアカウントでのみログインできます。`);
+      return;
+    }
+    // デモモードでは常にmember権限（管理者パネルにアクセス不可）
+    // メールアドレスは固定のデモ用アドレスを使用（入力値は使わない）
+    const newUser: User = {
+      uid: crypto.randomUUID(),
+      email: "demo@dot-jp.or.jp",
+      displayName: "デモユーザー",
+      role: "member",
+      isDemoUser: true,
+    };
+    setUser(newUser);
+    localStorage.setItem("portal_user", JSON.stringify(newUser));
+  }, []);
 
   const logout = useCallback(() => {
     setUser(null);
@@ -263,7 +277,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const tokenClient = g.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
-      scope: 'https://www.googleapis.com/auth/calendar.events.readonly',
+      scope: 'https://www.googleapis.com/auth/calendar.events',
       callback: (response: Record<string, unknown>) => {
         if (response.access_token) {
           setCalendarAccessToken(response.access_token as string);

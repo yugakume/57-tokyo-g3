@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useMeetingMinutes } from "@/contexts/MeetingMinutesContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
 import { useTask } from "@/contexts/TaskContext";
+import { useCountdown } from "@/contexts/CountdownContext";
 import { ChevronIcon, CloseIcon } from "@/components/Icons";
 import type { MeetingMinutes as MeetingMinutesType } from "@/types";
 
@@ -16,7 +17,7 @@ import type { MeetingMinutes as MeetingMinutesType } from "@/types";
 interface CalendarEvent {
   id: string;
   title: string;
-  type: "mtg" | "orientation" | "task";
+  type: "mtg" | "orientation" | "task" | "countdown";
   date: string;
   time?: string;
 }
@@ -48,6 +49,7 @@ export default function CalendarPage() {
   const { minutes, updateAttendance } = useMeetingMinutes();
   const { timeSlots, staffProfiles } = useSchedule();
   const { tasks } = useTask();
+  const { countdowns } = useCountdown();
   const router = useRouter();
 
   const today = new Date();
@@ -138,8 +140,18 @@ export default function CalendarPage() {
         });
       });
 
+    // カウントダウンイベント
+    countdowns.forEach(c => {
+      result.push({
+        id: `countdown-${c.id}`,
+        title: c.title,
+        type: "countdown",
+        date: c.targetDate,
+      });
+    });
+
     return result;
-  }, [minutes, timeSlots, tasks, staffIdToName]);
+  }, [minutes, timeSlots, tasks, staffIdToName, countdowns]);
 
   // 日付 -> イベント のマップ
   const eventsByDate = useMemo(() => {
@@ -238,6 +250,12 @@ export default function CalendarPage() {
       dot: "bg-orange-500",
       label: "タスク期限",
     },
+    countdown: {
+      bg: "bg-pink-50 dark:bg-pink-900/30",
+      text: "text-pink-700 dark:text-pink-300",
+      dot: "bg-pink-500",
+      label: "イベント",
+    },
   };
 
   return (
@@ -263,7 +281,7 @@ export default function CalendarPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={goToPrevMonth}
-            className="p-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
             aria-label="前月"
           >
             <ChevronIcon direction="left" className="w-5 h-5" />
@@ -273,7 +291,7 @@ export default function CalendarPage() {
           </h2>
           <button
             onClick={goToNextMonth}
-            className="p-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
             aria-label="次月"
           >
             <ChevronIcon direction="right" className="w-5 h-5" />

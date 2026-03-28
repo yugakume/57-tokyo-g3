@@ -4,6 +4,11 @@ import { createContext, useContext, useState, useEffect, ReactNode, useCallback 
 import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import type { LinkItem, LinkCategory, AccountInfo, Announcement, AnnouncementCategory } from "@/types";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  DEMO_LINKS, DEMO_LINK_CATEGORIES, DEMO_ACCOUNTS,
+  DEMO_ANNOUNCEMENTS, DEMO_ANNOUNCEMENT_CATEGORIES,
+} from "@/lib/demoData";
 
 interface DataContextType {
   links: LinkItem[];
@@ -31,6 +36,9 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export function DataProvider({ children }: { children: ReactNode }) {
+  const { user, isLoading } = useAuth();
+  const isDemoUser = user?.isDemoUser === true;
+
   const [links, setLinks] = useState<LinkItem[]>([]);
   const [categories, setCategories] = useState<LinkCategory[]>([]);
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
@@ -39,8 +47,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [loadedCount, setLoadedCount] = useState(0);
   const loaded = loadedCount >= 5;
 
-  // Firestore リアルタイム購読
+  // デモユーザーはダミーデータを使用
   useEffect(() => {
+    if (isLoading) return;
+    if (isDemoUser) {
+      setLinks(DEMO_LINKS);
+      setCategories(DEMO_LINK_CATEGORIES);
+      setAccounts(DEMO_ACCOUNTS);
+      setAnnouncements(DEMO_ANNOUNCEMENTS);
+      setAnnouncementCategories(DEMO_ANNOUNCEMENT_CATEGORIES);
+      return;
+    }
+
+    // Firestore リアルタイム購読（実ユーザーのみ）
     const unsubs: (() => void)[] = [];
 
     // Links
@@ -79,79 +98,96 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }));
 
     return () => unsubs.forEach(u => u());
-  }, []);
+  }, [isDemoUser, isLoading]);
+
+  const demoNoOp = useCallback(async () => { /* デモモードでは変更不可 */ }, []);
 
   // --- Links ---
   const addLink = useCallback(async (link: Omit<LinkItem, "id" | "createdAt" | "updatedAt">) => {
+    if (isDemoUser) return;
     const id = `link-${Date.now()}`;
     const now = new Date().toISOString();
     const newLink = { ...link, id, createdAt: now, updatedAt: now };
     await setDoc(doc(db, "links", id), newLink);
-  }, []);
+  }, [isDemoUser]);
 
   const updateLink = useCallback(async (id: string, updates: Partial<LinkItem>) => {
+    if (isDemoUser) return;
     await updateDoc(doc(db, "links", id), { ...updates, updatedAt: new Date().toISOString() });
-  }, []);
+  }, [isDemoUser]);
 
   const deleteLink = useCallback(async (id: string) => {
+    if (isDemoUser) return;
     await deleteDoc(doc(db, "links", id));
-  }, []);
+  }, [isDemoUser]);
 
   // --- Categories ---
   const addCategory = useCallback(async (category: Omit<LinkCategory, "id">) => {
+    if (isDemoUser) return;
     const id = `cat-${Date.now()}`;
     await setDoc(doc(db, "linkCategories", id), { ...category, id });
-  }, []);
+  }, [isDemoUser]);
 
   const updateCategory = useCallback(async (id: string, updates: Partial<LinkCategory>) => {
+    if (isDemoUser) return;
     await updateDoc(doc(db, "linkCategories", id), updates);
-  }, []);
+  }, [isDemoUser]);
 
   const deleteCategory = useCallback(async (id: string) => {
+    if (isDemoUser) return;
     await deleteDoc(doc(db, "linkCategories", id));
-  }, []);
+  }, [isDemoUser]);
 
   // --- Accounts ---
   const addAccount = useCallback(async (account: Omit<AccountInfo, "id">) => {
+    if (isDemoUser) return;
     const id = `acc-${Date.now()}`;
     await setDoc(doc(db, "accounts", id), { ...account, id });
-  }, []);
+  }, [isDemoUser]);
 
   const updateAccount = useCallback(async (id: string, updates: Partial<AccountInfo>) => {
+    if (isDemoUser) return;
     await updateDoc(doc(db, "accounts", id), updates);
-  }, []);
+  }, [isDemoUser]);
 
   const deleteAccount = useCallback(async (id: string) => {
+    if (isDemoUser) return;
     await deleteDoc(doc(db, "accounts", id));
-  }, []);
+  }, [isDemoUser]);
 
   // --- Announcements ---
   const addAnnouncement = useCallback(async (announcement: Omit<Announcement, "id">) => {
+    if (isDemoUser) return;
     const id = `ann-${Date.now()}`;
     await setDoc(doc(db, "announcements", id), { ...announcement, id });
-  }, []);
+  }, [isDemoUser]);
 
   const updateAnnouncement = useCallback(async (id: string, updates: Partial<Announcement>) => {
+    if (isDemoUser) return;
     await updateDoc(doc(db, "announcements", id), updates);
-  }, []);
+  }, [isDemoUser]);
 
   const deleteAnnouncement = useCallback(async (id: string) => {
+    if (isDemoUser) return;
     await deleteDoc(doc(db, "announcements", id));
-  }, []);
+  }, [isDemoUser]);
 
   // --- Announcement Categories ---
   const addAnnouncementCategory = useCallback(async (category: Omit<AnnouncementCategory, "id">) => {
+    if (isDemoUser) return;
     const id = `anncat-${Date.now()}`;
     await setDoc(doc(db, "announcementCategories", id), { ...category, id });
-  }, []);
+  }, [isDemoUser]);
 
   const updateAnnouncementCategory = useCallback(async (id: string, updates: Partial<AnnouncementCategory>) => {
+    if (isDemoUser) return;
     await updateDoc(doc(db, "announcementCategories", id), updates);
-  }, []);
+  }, [isDemoUser]);
 
   const deleteAnnouncementCategory = useCallback(async (id: string) => {
+    if (isDemoUser) return;
     await deleteDoc(doc(db, "announcementCategories", id));
-  }, []);
+  }, [isDemoUser]);
 
   return (
     <DataContext.Provider value={{

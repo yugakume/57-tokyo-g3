@@ -4,6 +4,7 @@ export interface User {
   displayName: string;
   photoURL?: string;
   role: "admin" | "member";
+  isDemoUser?: boolean;
 }
 
 export interface LinkItem {
@@ -155,6 +156,16 @@ export interface Booking {
 
 export type MeetingLocation = "対面" | "オンライン" | "ハイブリッド";
 
+export interface AgendaItem {
+  id: string;
+  type: "role" | "individual";
+  roleId?: string;
+  roleName?: string;
+  personEmail?: string;
+  personName?: string;
+  topic: string;
+}
+
 export interface MeetingMinutes {
   id: string;
   date: string;           // "2026-03-21"
@@ -166,10 +177,48 @@ export interface MeetingMinutes {
   venueStation?: string;   // 会場最寄駅
   attendees: string[];    // 出席者名
   attendance?: Record<string, "出席" | "欠席" | "遅刻" | "未回答">; // email -> status
+  agenda?: AgendaItem[];  // アジェンダ（出席者と議事録の間）
   content: string;        // 議事録本文
   createdBy: string;      // user email
   createdAt: string;
   updatedAt: string;
+}
+
+// =============================================
+// 行動量報告
+// =============================================
+
+export const CAMPAIGN_START = "2026-04-01";
+export const CAMPAIGN_END = "2026-06-30";
+
+export interface ActivityReport {
+  id: string;
+  date: string;           // "2026-04-01"
+  userEmail: string;
+  userName: string;
+  instagram: {
+    count: number;          // 件数
+    story: "○" | "×";       // ストーリー投稿
+    reactions: number;      // 反応数
+    pending: number;        // 日調中
+    tomorrowGoal: number;   // 明日の目標
+  };
+  review: {
+    count: number;          // 件数
+    tomorrowCount: number;  // 明日の件数
+    reactions: number;      // 反応
+  };
+  topicAnswer: string;    // お題への回答
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DailyTopic {
+  id: string;
+  date: string;           // "2026-04-01"
+  question: string;
+  createdBy: string;
+  createdAt: string;
 }
 
 // =============================================

@@ -10,7 +10,7 @@ import { TrashIcon, EditIcon, CheckIcon, CalendarIcon, CloseIcon, CopyIcon, Exte
 import Toast from "@/components/Toast";
 import { fetchCalendarEvents, type CalendarEvent } from "@/lib/googleCalendar";
 
-type Tab = "slots" | "bookings" | "profile";
+type Tab = "slots" | "bookings";
 
 // =============================================
 // ユーティリティ
@@ -88,7 +88,6 @@ export default function SchedulePage() {
   const tabs: { id: Tab; label: string }[] = [
     { id: "slots", label: "空き日程" },
     { id: "bookings", label: "予約管理" },
-    { id: "profile", label: "スタッフ設定" },
   ];
 
   return (
@@ -139,17 +138,8 @@ export default function SchedulePage() {
           confirmBooking={confirmBooking}
           cancelBooking={cancelBooking}
           setToast={setToast}
-        />
-      )}
-
-      {activeTab === "profile" && (
-        <ProfileTab
-          myProfile={myProfile}
-          userEmail={user.email}
-          staffRoles={staffRoles}
-          addStaffProfile={addStaffProfile}
-          updateStaffProfile={updateStaffProfile}
-          setToast={setToast}
+          calendarAccessToken={calendarAccessToken}
+          requestCalendarAccess={requestCalendarAccess}
         />
       )}
 
@@ -997,6 +987,33 @@ function SlotsTab({
 // Tab 2: 予約管理
 // =============================================
 
+async function createGoogleMeetEvent(
+  accessToken: string,
+  slot: TimeSlot,
+  booking: Booking,
+  eventTypeLabel: string,
+): Promise<string | null> {
+  try {
+    const response = await fetch(
+      'https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1',
+      {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          summary: `${eventTypeLabel} - ${booking.studentName}`,
+          start: { dateTime: `${slot.date}T${slot.startTime}:00`, timeZone: 'Asia/Tokyo' },
+          end: { dateTime: `${slot.date}T${slot.endTime}:00`, timeZone: 'Asia/Tokyo' },
+          attendees: [{ email: booking.studentEmail }],
+          conferenceData: { createRequest: { requestId: `meet-${booking.id}-${Date.now()}`, conferenceSolutionKey: { type: 'hangoutsMeet' } } },
+        }),
+      }
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.conferenceData?.entryPoints?.find((e: { entryPointType: string; uri: string }) => e.entryPointType === 'video')?.uri || null;
+  } catch { return null; }
+}
+
 function BookingsTab({
   bookings,
   timeSlots,
@@ -1005,14 +1022,18 @@ function BookingsTab({
   confirmBooking,
   cancelBooking,
   setToast,
+  calendarAccessToken,
+  requestCalendarAccess,
 }: {
   bookings: Booking[];
   timeSlots: TimeSlot[];
   staffProfiles: StaffProfile[];
   myProfile: StaffProfile | undefined;
-  confirmBooking: (bookingId: string, slotId: string, staffId: string) => void;
+  confirmBooking: (bookingId: string, slotId: string, staffId: string, meetLink?: string) => void;
   cancelBooking: (bookingId: string) => void;
   setToast: (msg: string) => void;
+  calendarAccessToken: string | null;
+  requestCalendarAccess: () => void;
 }) {
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "confirmed" | "cancelled">("all");
   const [confirmingBookingId, setConfirmingBookingId] = useState<string | null>(null);
@@ -1027,12 +1048,20 @@ function BookingsTab({
   const getSlot = (id: string) => timeSlots.find(s => s.id === id);
   const getStaff = (id: string) => staffProfiles.find(p => p.id === id);
 
-  const handleConfirm = (booking: Booking) => {
+  const handleConfirm = async (booking: Booking) => {
     if (!selectedSlotId || !myProfile) return;
-    confirmBooking(booking.id, selectedSlotId, myProfile.id);
+    let meetLink: string | undefined;
+    if (calendarAccessToken) {
+      const slot = timeSlots.find(s => s.id === selectedSlotId);
+      if (slot) {
+        const link = await createGoogleMeetEvent(calendarAccessToken, slot, booking, EVENT_TYPE_LABELS[booking.eventType]);
+        if (link) meetLink = link;
+      }
+    }
+    confirmBooking(booking.id, selectedSlotId, myProfile.id, meetLink);
     setConfirmingBookingId(null);
     setSelectedSlotId(null);
-    setToast("予約を確定しました");
+    setToast(meetLink ? `予約を確定しました（Meet: ${meetLink}）` : "予約を確定しました");
   };
 
   const handleCancel = (bookingId: string) => {
@@ -1044,6 +1073,23 @@ function BookingsTab({
 
   return (
     <div>
+      {/* Calendar integration */}
+      <div className="mb-4 flex items-center gap-2">
+        {calendarAccessToken ? (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-700 rounded-lg">
+            <span className="w-2 h-2 bg-green-500 rounded-full" />
+            Google Calendar連携済み（Meet自動発行）
+          </span>
+        ) : (
+          <button
+            onClick={requestCalendarAccess}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-800 transition-colors"
+          >
+            <CalendarIcon className="w-3.5 h-3.5" />
+            Google Calendar連携（Meet自動発行）
+          </button>
+        )}
+      </div>
       {/* Filter */}
       <div className="flex gap-2 mb-4 flex-wrap">
         {(["all", "pending", "confirmed", "cancelled"] as const).map(status => (

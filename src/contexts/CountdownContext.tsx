@@ -3,6 +3,8 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import { db } from "@/lib/firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
+import { useAuth } from "@/contexts/AuthContext";
+import { DEMO_COUNTDOWNS } from "@/lib/demoData";
 
 // =============================================
 // CountdownContext
@@ -28,20 +30,29 @@ const CountdownContext = createContext<CountdownContextType | undefined>(undefin
 // =============================================
 
 export function CountdownProvider({ children }: { children: ReactNode }) {
+  const { user, isLoading } = useAuth();
+  const isDemoUser = user?.isDemoUser === true;
+
   const [countdowns, setCountdowns] = useState<CountdownItem[]>([]);
   const [loaded, setLoaded] = useState(false);
 
-  // Firestoreリアルタイムリスナー
   useEffect(() => {
+    if (isLoading) return;
+    if (isDemoUser) {
+      setCountdowns(DEMO_COUNTDOWNS);
+      setLoaded(true);
+      return;
+    }
     const unsub = onSnapshot(collection(db, "countdowns"), (snapshot) => {
       const data = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }) as CountdownItem);
       setCountdowns(data);
       setLoaded(true);
     });
     return () => unsub();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isDemoUser, isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addCountdown = useCallback((item: Omit<CountdownItem, "id">) => {
+    if (isDemoUser) return;
     const newItem: CountdownItem = {
       ...item,
       id: `countdown-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -49,12 +60,13 @@ export function CountdownProvider({ children }: { children: ReactNode }) {
     setCountdowns((prev) => [...prev, newItem]);
     const { id, ...data } = newItem;
     setDoc(doc(db, "countdowns", id), data);
-  }, []);
+  }, [isDemoUser]);
 
   const deleteCountdown = useCallback((id: string) => {
+    if (isDemoUser) return;
     setCountdowns((prev) => prev.filter((c) => c.id !== id));
     deleteDoc(doc(db, "countdowns", id));
-  }, []);
+  }, [isDemoUser]);
 
   return (
     <CountdownContext.Provider value={{ countdowns, addCountdown, deleteCountdown }}>

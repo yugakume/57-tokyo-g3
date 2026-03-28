@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
 import { useTheme } from "@/contexts/ThemeContext";
-import { MenuIcon, CloseIcon, HomeIcon, LinkListIcon, KeyIcon, CalendarIcon, DocumentIcon, ClipboardIcon, UsersIcon, SettingsIcon, LogOutIcon, EditIcon, BellIcon, CurrencyIcon } from "./Icons";
+import { MenuIcon, CloseIcon, HomeIcon, LinkListIcon, KeyIcon, CalendarIcon, DocumentIcon, ClipboardIcon, UsersIcon, SettingsIcon, LogOutIcon, EditIcon, BellIcon, CurrencyIcon, ActivityIcon } from "./Icons";
 import type { StaffProfile } from "@/types";
 
 export default function Header() {
@@ -105,6 +105,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const pathname = usePathname();
+  const dragNavItem = useRef<number | null>(null);
+  const dragNavOverItem = useRef<number | null>(null);
+  const [navOrder, setNavOrder] = useState<string[]>([]);
 
   const myProfile = useMemo(() => {
     if (!user) return undefined;
@@ -116,9 +119,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return myProfile?.fullName || myProfile?.lastName || user.displayName;
   }, [user, myProfile]);
 
+  // Load saved nav order from localStorage
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const stored = localStorage.getItem(`navOrder-${user.email}`);
+      if (stored) setNavOrder(JSON.parse(stored));
+    } catch {}
+  }, [user?.email]);
+
   if (!user) return <>{children}</>;
 
-  const navItems = [
+  const baseNavItems = [
     { href: "/dashboard", label: "ホーム", icon: HomeIcon },
     { href: "/news", label: "お知らせ", icon: BellIcon },
     { href: "/links", label: "業務リンク集", icon: LinkListIcon },
@@ -129,8 +141,34 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/tasks", label: "タスク", icon: ClipboardIcon },
     { href: "/members", label: "メンバー", icon: UsersIcon },
     { href: "/calendar", label: "カレンダー", icon: CalendarIcon },
+    { href: "/activity", label: "行動量報告", icon: ActivityIcon },
     ...(isAdmin ? [{ href: "/admin", label: "管理", icon: SettingsIcon }] : []),
   ];
+
+  // Apply saved order
+  const navItems = useMemo(() => {
+    if (navOrder.length === 0) return baseNavItems;
+    const ordered = navOrder
+      .map((href) => baseNavItems.find((n) => n.href === href))
+      .filter(Boolean) as typeof baseNavItems;
+    baseNavItems.forEach((item) => {
+      if (!ordered.find((n) => n.href === item.href)) ordered.push(item);
+    });
+    return ordered;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navOrder, isAdmin]);
+
+  const handleNavDrop = () => {
+    if (dragNavItem.current === null || dragNavOverItem.current === null) return;
+    const items = [...navItems];
+    const [dragged] = items.splice(dragNavItem.current, 1);
+    items.splice(dragNavOverItem.current, 0, dragged);
+    const newOrder = items.map((i) => i.href);
+    setNavOrder(newOrder);
+    try { localStorage.setItem(`navOrder-${user.email}`, JSON.stringify(newOrder)); } catch {}
+    dragNavItem.current = null;
+    dragNavOverItem.current = null;
+  };
 
   const isActive = (href: string) => pathname === href || pathname === href + "/" || (href !== "/dashboard" && pathname.startsWith(href + "/"));
 
@@ -176,20 +214,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             </button>
             <nav className="p-2">
-              {navItems.map((item) => (
-                <Link
+              {navItems.map((item, idx) => (
+                <div
                   key={item.href}
-                  href={item.href}
-                  onClick={() => setMenuOpen(false)}
-                  className={`flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-colors ${
-                    isActive(item.href)
-                      ? "bg-blue-50 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 font-medium"
-                      : "text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-gray-800 hover:text-blue-600 dark:hover:text-blue-400"
-                  }`}
+                  draggable
+                  onDragStart={() => { dragNavItem.current = idx; }}
+                  onDragOver={(e) => { e.preventDefault(); dragNavOverItem.current = idx; }}
+                  onDrop={handleNavDrop}
+                  onDragEnd={() => { dragNavItem.current = null; dragNavOverItem.current = null; }}
+                  className="flex items-center group"
                 >
-                  <item.icon className="w-5 h-5" />
-                  {item.label}
-                </Link>
+                  <div className="cursor-grab active:cursor-grabbing px-1 text-gray-200 dark:text-gray-700 group-hover:text-gray-400 transition-colors shrink-0">
+                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+                  </div>
+                  <Link
+                    href={item.href}
+                    onClick={() => setMenuOpen(false)}
+                    className={`flex-1 flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-colors ${
+                      isActive(item.href)
+                        ? "bg-blue-50 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 font-medium"
+                        : "text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-gray-800 hover:text-blue-600 dark:hover:text-blue-400"
+                    }`}
+                  >
+                    <item.icon className="w-5 h-5" />
+                    {item.label}
+                  </Link>
+                </div>
               ))}
               <button
                 onClick={() => { logout(); setMenuOpen(false); }}
@@ -216,23 +266,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {navItems.map((item) => (
-            <Link
+        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
+          {navItems.map((item, idx) => (
+            <div
               key={item.href}
-              href={item.href}
-              className={`relative flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-all nav-link-underline ${
-                isActive(item.href)
-                  ? "bg-blue-50 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 font-semibold shadow-sm"
-                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
-              }`}
+              draggable
+              onDragStart={() => { dragNavItem.current = idx; }}
+              onDragOver={(e) => { e.preventDefault(); dragNavOverItem.current = idx; }}
+              onDrop={handleNavDrop}
+              onDragEnd={() => { dragNavItem.current = null; dragNavOverItem.current = null; }}
+              className="flex items-center group"
             >
-              {isActive(item.href) && (
-                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-blue-600 dark:bg-blue-400 rounded-r-full" />
-              )}
-              <item.icon className={`w-5 h-5 ${isActive(item.href) ? "text-blue-600 dark:text-blue-400" : ""}`} />
-              {item.label}
-            </Link>
+              <div className="cursor-grab active:cursor-grabbing px-1 opacity-0 group-hover:opacity-100 text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-all shrink-0">
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+              </div>
+              <Link
+                href={item.href}
+                className={`relative flex-1 flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-all nav-link-underline ${
+                  isActive(item.href)
+                    ? "bg-blue-50 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 font-semibold shadow-sm"
+                    : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
+                }`}
+              >
+                {isActive(item.href) && (
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-blue-600 dark:bg-blue-400 rounded-r-full" />
+                )}
+                <item.icon className={`w-5 h-5 shrink-0 ${isActive(item.href) ? "text-blue-600 dark:text-blue-400" : ""}`} />
+                {item.label}
+              </Link>
+            </div>
           ))}
         </nav>
 
@@ -642,6 +704,30 @@ function ProfileModal({
                 <option key={g} value={g}>{g}</option>
               ))}
             </select>
+          </div>
+
+          {/* Gender */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">性別</label>
+            <div className="flex gap-2">
+              {(["male", "female", "other"] as const).map(g => {
+                const labels = { male: "男性", female: "女性", other: "その他" };
+                return (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => setGender(g)}
+                    className={`flex-1 py-2 text-sm rounded-lg border transition-colors ${
+                      gender === g
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+                    }`}
+                  >
+                    {labels[g]}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Buttons */}

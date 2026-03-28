@@ -59,14 +59,15 @@ export default function ExpensesPage() {
   // Meetings with venueStation, grouped by month
   const meetingsWithStation = useMemo(() => {
     return [...minutes]
-      .filter(m => m.venueStation)
-      .sort((a, b) => b.date.localeCompare(a.date));
+      .filter(m => m.venueStation && m.date)
+      .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
   }, [minutes]);
 
   const groupedByMonth = useMemo(() => {
     const groups: Record<string, typeof meetingsWithStation> = {};
     meetingsWithStation.forEach(m => {
-      const ym = m.date.slice(0, 7);
+      const ym = m.date?.slice(0, 7);
+      if (!ym) return;
       if (!groups[ym]) groups[ym] = [];
       groups[ym].push(m);
     });
