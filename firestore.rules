@@ -1,0 +1,31 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ログイン済みスタッフは全コレクションに読み書き可
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Google Apps Script (自動リマインド) 用の読み取り許可
+    // ※ APIキーさえあれば読み取り可能（書き込みは要認証のまま）
+    match /bookings/{id} {
+      allow read: if true;
+    }
+    match /timeSlots/{id} {
+      allow read: if true;
+    }
+    match /staffProfiles/{id} {
+      allow read: if true;
+    }
+    match /tasks/{id} {
+      allow read: if true;
+    }
+    match /staffRoles/{id} {
+      allow read: if true;
+    }
+    match /settings/{id} {
+      allow read: if true;
+    }
+  }
+}

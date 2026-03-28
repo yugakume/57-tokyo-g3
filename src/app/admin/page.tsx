@@ -10,10 +10,10 @@ import Toast from "@/components/Toast";
 import { LinkIcon, PlusIcon, TrashIcon, EditIcon, CloseIcon } from "@/components/Icons";
 import type { LinkItem, LinkIconType, AccountInfo, InstagramAccount, Announcement, AnnouncementCategory } from "@/types";
 
-type Tab = "links" | "categories" | "accounts" | "users" | "roles" | "announcements" | "announcementCategories" | "countdowns";
+type Tab = "links" | "categories" | "accounts" | "users" | "roles" | "announcements" | "announcementCategories" | "countdowns" | "branch";
 
 export default function AdminPage() {
-  const { user, isLoading, isAdmin, allowedEmails, adminEmails, addAllowedEmail, removeAllowedEmail, addAdminEmail, removeAdminEmail } = useAuth();
+  const { user, isLoading, isAdmin, allowedEmails, adminEmails, addAllowedEmail, removeAllowedEmail, addAdminEmail, removeAdminEmail, branchEmail, setBranchEmail } = useAuth();
   const {
     links, categories, accounts, instaAccounts, announcements, announcementCategories,
     addLink, updateLink, deleteLink,
@@ -375,6 +375,7 @@ export default function AdminPage() {
     { id: "users", label: "ユーザー管理" },
     { id: "roles", label: "ロール管理" },
     { id: "countdowns", label: "カウントダウン" },
+    { id: "branch", label: "支部設定" },
   ];
 
   const iconOptions: { value: LinkIconType; label: string }[] = [
@@ -1134,6 +1135,15 @@ export default function AdminPage() {
           </div>
         )}
 
+        {/* 支部設定 */}
+        {activeTab === "branch" && (
+          <BranchSettingsTab
+            branchEmail={branchEmail}
+            setBranchEmail={setBranchEmail}
+            onToast={setToast}
+          />
+        )}
+
           </div>{/* end content area */}
         </div>{/* end sidebar layout */}
       </div>
@@ -1425,6 +1435,93 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
           box-shadow: 0 0 0 2px #3b82f6;
         }
       `}</style>
+    </div>
+  );
+}
+
+// =============================================
+// 支部設定タブ
+// =============================================
+function BranchSettingsTab({
+  branchEmail,
+  setBranchEmail,
+  onToast,
+}: {
+  branchEmail: string;
+  setBranchEmail: (email: string) => Promise<void>;
+  onToast: (msg: string) => void;
+}) {
+  const [input, setInput] = useState(branchEmail);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!input.trim()) return;
+    setSaving(true);
+    try {
+      await setBranchEmail(input.trim());
+      onToast("支部メールアドレスを保存しました");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">支部メールアドレス</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+          リマインドメールの送信元として使用するメールアドレスです。<br />
+          Google Apps Script（GAS）で自動送信する際、このアドレスが送信元になります。<br />
+          他の支部にサイトを展開する際はここを変更してください。
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="email"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            placeholder="例: kanto3@dot-jp.or.jp"
+            className="flex-1 px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            onClick={handleSave}
+            disabled={saving || !input.trim()}
+            className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          >
+            {saving ? "保存中..." : "保存"}
+          </button>
+        </div>
+        {branchEmail && (
+          <p className="mt-2 text-xs text-green-600 dark:text-green-400">
+            ✓ 現在の設定: {branchEmail}
+          </p>
+        )}
+      </div>
+
+      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl p-4">
+        <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">🤖 Google Apps Script (GAS) 自動送信設定</h3>
+        <ol className="text-sm text-amber-700 dark:text-amber-400 space-y-2 list-decimal ml-4">
+          <li>
+            <a href="https://script.google.com" target="_blank" rel="noopener noreferrer" className="underline font-medium">script.google.com</a> を開き、新しいプロジェクトを作成
+          </li>
+          <li>リポジトリの <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">scripts/send-reminders.gs</code> の内容をすべてコピー＆ペースト</li>
+          <li>「プロジェクトの設定」→「スクリプトプロパティ」に以下を追加:
+            <div className="mt-1 bg-amber-100 dark:bg-amber-900/50 rounded p-2 font-mono text-xs space-y-0.5">
+              <div>FIREBASE_PROJECT_ID = <span className="text-amber-900 dark:text-amber-300">astute-city-490906-k6</span></div>
+              <div>FIREBASE_API_KEY = <span className="text-amber-900 dark:text-amber-300">AIzaSyCPU7Ju3MA8f3KfNN3yx9qzFX3U9ZP2fVY</span></div>
+              <div>ORIENTATION_DAYS = <span className="text-amber-900 dark:text-amber-300">1</span>（前日）</div>
+              <div>ORIENTATION_HOUR = <span className="text-amber-900 dark:text-amber-300">9</span>（9時送信）</div>
+              <div>TASK_DAYS = <span className="text-amber-900 dark:text-amber-300">1</span></div>
+              <div>TASK_HOUR = <span className="text-amber-900 dark:text-amber-300">9</span></div>
+            </div>
+          </li>
+          <li><strong>kanto3@dot-jp.or.jp でログインした状態</strong>で「sendDailyReminders」を一度手動実行 → 権限を許可</li>
+          <li>「トリガーを追加」→ sendDailyReminders → 時間主導型 → 日タイマー → 午前9〜10時</li>
+          <li>Firebase Console → Firestore → ルール に <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">firestore.rules</code> の内容を適用</li>
+        </ol>
+        <p className="mt-3 text-xs text-amber-600 dark:text-amber-500">
+          設定完了後は毎日自動送信されます。サイトを開いていなくてもGoogleのサーバーで動きます。
+        </p>
+      </div>
     </div>
   );
 }

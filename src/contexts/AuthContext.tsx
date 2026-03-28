@@ -55,6 +55,9 @@ interface AuthContextType {
   removeAllowedEmail: (email: string) => void;
   addAdminEmail: (email: string) => void;
   removeAdminEmail: (email: string) => void;
+  // 支部設定
+  branchEmail: string;        // 支部メールアドレス（管理者が設定）
+  setBranchEmail: (email: string) => Promise<void>;
   // Googleカレンダー連携（複数アカウント・永続）
   calendarAccounts: CalendarAccount[];
   calendarAccessToken: string | null;  // 後方互換: 1つ目のトークン
@@ -85,6 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [adminEmails, setAdminEmails] = useState<string[]>([]);
   const [calendarAccounts, setCalendarAccounts] = useState<CalendarAccount[]>([]);
   const [gmailToken, setGmailToken] = useState<GmailToken | null>(null);
+  const [branchEmail, setBranchEmailState] = useState<string>("");
 
   // 後方互換：1つ目のアカウントのトークンを返す
   const calendarAccessToken = calendarAccounts[0]?.accessToken ?? null;
@@ -169,6 +173,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAdminEmails(loadedAdmin);
         saveSettingsCache("portal_settings_adminEmails", loadedAdmin);
       }
+
+      // 支部メールアドレスを読み込み
+      try {
+        const cachedBranch = localStorage.getItem("portal_settings_branchEmail");
+        if (cachedBranch) {
+          setBranchEmailState(cachedBranch);
+        } else {
+          const branchSnap = await getDoc(doc(db, "settings", "branchSettings"));
+          if (branchSnap.exists()) {
+            const email = branchSnap.data().email ?? "";
+            setBranchEmailState(email);
+            localStorage.setItem("portal_settings_branchEmail", email);
+          }
+        }
+      } catch { /* ignore */ }
 
       // localStorageからユーザー復元（許可チェック付き）
       const stored = localStorage.getItem("portal_user");
@@ -312,6 +331,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("portal_user");
   }, []);
 
+  // 支部メールアドレス設定（管理者のみ）
+  const setBranchEmail = useCallback(async (email: string) => {
+    setBranchEmailState(email);
+    await setDoc(doc(db, "settings", "branchSettings"), { email });
+    try { localStorage.setItem("portal_settings_branchEmail", email); } catch { /* ignore */ }
+  }, []);
+
   // 管理者用：許可メール管理（Firestore保存）
   // ※ 書き込み時にキャッシュも更新してリードを節約
   const addAllowedEmail = useCallback(async (email: string) => {
@@ -445,6 +471,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       addAllowedEmail, removeAllowedEmail, addAdminEmail, removeAdminEmail,
       calendarAccounts, calendarAccessToken, requestCalendarAccess, removeCalendarAccount,
       gmailToken, requestGmailAccess, removeGmailToken,
+      branchEmail, setBranchEmail,
     }}>
       {children}
     </AuthContext.Provider>
