@@ -14,7 +14,7 @@ const ALLOWED_DOMAIN = "dot-jp.or.jp";
 export const GOOGLE_CLIENT_ID = "346842421426-kthmpbq2kndbahrh197i7bhldcab9uql.apps.googleusercontent.com";
 
 // デモモードフラグ（本番デプロイ時は false にする）
-const DEMO_MODE = true;
+const DEMO_MODE = false;
 
 const DEFAULT_ADMIN_EMAILS = ["yuga_kume@dot-jp.or.jp"];
 
