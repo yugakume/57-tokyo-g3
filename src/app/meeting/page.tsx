@@ -189,7 +189,7 @@ export default function MeetingPage() {
               : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
           }`}
         >
-          {hidePast ? "過去を非表示中" : "過去も表示中"}
+          {hidePast ? "過去のMTGを非表示" : "過去のMTGを表示"}
         </button>
         <div className="relative w-full sm:w-64">
           <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
