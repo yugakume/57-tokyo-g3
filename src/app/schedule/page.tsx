@@ -736,8 +736,9 @@ function SlotsTab({
           </div>
         )}
 
-        {/* Time grid */}
-        <div className="relative grid overflow-y-auto" style={{ gridTemplateColumns: `60px repeat(${viewDates.length}, 1fr)`, height: `${CALENDAR_TIMES.length * 28}px` }}>
+        {/* Time grid - スクロール可能ラッパー（終日行を上に固定するため） */}
+        <div className="overflow-y-auto" style={{ height: 'calc(100vh - 260px)' }}>
+        <div className="relative" style={{ height: `${CALENDAR_TIMES.length * 28}px` }}>
           {/* Time labels */}
           {CALENDAR_TIMES.map((time, idx) => (
             <div
@@ -851,6 +852,7 @@ function SlotsTab({
               </div>
             </div>
           )}
+        </div>
         </div>
       </div>
       )}
