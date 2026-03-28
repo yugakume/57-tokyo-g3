@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
 import { useTheme } from "@/contexts/ThemeContext";
-import { MenuIcon, CloseIcon, HomeIcon, LinkListIcon, KeyIcon, CalendarIcon, DocumentIcon, ClipboardIcon, UsersIcon, SettingsIcon, LogOutIcon, EditIcon, BellIcon, CurrencyIcon, ActivityIcon } from "./Icons";
+import { MenuIcon, CloseIcon, HomeIcon, LinkListIcon, KeyIcon, CalendarIcon, DocumentIcon, ClipboardIcon, UsersIcon, SettingsIcon, LogOutIcon, EditIcon, BellIcon, CurrencyIcon, ActivityIcon, MailIcon } from "./Icons";
 import type { StaffProfile } from "@/types";
 
 export default function Header() {
@@ -129,6 +129,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/meeting", label: "ミーティング", icon: DocumentIcon },
     { href: "/expenses", label: "交通費", icon: CurrencyIcon },
     { href: "/tasks", label: "タスク", icon: ClipboardIcon },
+    { href: "/email", label: "メール設定", icon: MailIcon },
     { href: "/members", label: "メンバー", icon: UsersIcon },
     { href: "/calendar", label: "カレンダー", icon: CalendarIcon },
     { href: "/activity", label: "行動量報告", icon: ActivityIcon },
