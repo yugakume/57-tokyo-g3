@@ -191,6 +191,26 @@ function indexToTime(index: number): string {
 // 空き枠登録可能なEventType（meeting除外）
 const SLOT_EVENT_TYPES: EventType[] = ["orientation", "hearing", "selection", "other"];
 
+// Googleカレンダーのカラーラベル → 色（colorIdは"1"〜"11"）
+const GCAL_COLOR_MAP: Record<string, string> = {
+  "1":  "#D50000", // Tomato
+  "2":  "#E67C73", // Flamingo
+  "3":  "#F4511E", // Tangerine
+  "4":  "#F6BF26", // Banana
+  "5":  "#33B679", // Sage
+  "6":  "#0B8043", // Basil
+  "7":  "#039BE5", // Peacock
+  "8":  "#3F51B5", // Blueberry
+  "9":  "#7986CB", // Lavender
+  "10": "#8E24AA", // Grape
+  "11": "#616161", // Graphite
+};
+const GCAL_DEFAULT_COLOR = "#7986CB"; // デフォルト: Lavender
+
+function getGcalColor(colorId?: string): string {
+  return colorId ? (GCAL_COLOR_MAP[colorId] ?? GCAL_DEFAULT_COLOR) : GCAL_DEFAULT_COLOR;
+}
+
 function SlotsTab({
   myProfile,
   staffRoles,
@@ -321,27 +341,41 @@ function SlotsTab({
     return () => { cancelled = true; };
   }, [calendarAccounts, weekDates, setToast]);
 
-  // カレンダーイベントを日付+時間インデックスでマッピング
+  // 終日イベントを日付ごとにまとめる（ヘッダーに表示）
+  const gcalAllDayByDate = useMemo(() => {
+    const map = new Map<string, CalendarEvent[]>();
+    calendarEvents.filter(ev => ev.allDay).forEach(ev => {
+      // 終日イベントは start が "YYYY-MM-DD" 形式
+      const startDate = ev.start.substring(0, 10);
+      const endDate = ev.end.substring(0, 10); // 終日は終了日が翌日になる
+      viewDates.forEach(date => {
+        if (date >= startDate && date < endDate) {
+          const existing = map.get(date) || [];
+          existing.push(ev);
+          map.set(date, existing);
+        }
+      });
+    });
+    return map;
+  }, [calendarEvents, viewDates]);
+
+  // 時間指定イベントを日付+時間インデックスでマッピング（終日は除外）
   const gcalBlocksByDate = useMemo(() => {
     const map = new Map<string, { ev: CalendarEvent; startIdx: number; spanCount: number }[]>();
-    calendarEvents.forEach(ev => {
-      const dateStr = ev.start.length > 10 ? ev.start.substring(0, 10) : ev.start;
+    calendarEvents.filter(ev => !ev.allDay).forEach(ev => {
+      const dateStr = ev.start.substring(0, 10);
       if (!weekDates.includes(dateStr)) return;
-      const existing = map.get(dateStr) || [];
-      if (ev.allDay) {
-        existing.push({ ev, startIdx: 0, spanCount: CALENDAR_TIMES.length });
-      } else {
-        const startH = parseInt(ev.start.substring(11, 13));
-        const startM = parseInt(ev.start.substring(14, 16));
-        const endH = parseInt(ev.end.substring(11, 13));
-        const endM = parseInt(ev.end.substring(14, 16));
-        const sIdx = Math.max(0, startH * 2 + (startM >= 30 ? 1 : 0));
-        const eIdx = Math.min(CALENDAR_TIMES.length, endH * 2 + (endM > 0 ? (endM >= 30 ? 2 : 1) : 0));
-        if (eIdx > sIdx) {
-          existing.push({ ev, startIdx: sIdx, spanCount: eIdx - sIdx });
-        }
+      const startH = parseInt(ev.start.substring(11, 13));
+      const startM = parseInt(ev.start.substring(14, 16));
+      const endH = parseInt(ev.end.substring(11, 13));
+      const endM = parseInt(ev.end.substring(14, 16));
+      const sIdx = Math.max(0, startH * 2 + (startM >= 30 ? 1 : 0));
+      const eIdx = Math.min(CALENDAR_TIMES.length, endH * 2 + (endM > 0 ? (endM >= 30 ? 2 : 1) : 0));
+      if (eIdx > sIdx) {
+        const existing = map.get(dateStr) || [];
+        existing.push({ ev, startIdx: sIdx, spanCount: eIdx - sIdx });
+        map.set(dateStr, existing);
       }
-      map.set(dateStr, existing);
     });
     return map;
   }, [calendarEvents, weekDates]);
@@ -675,6 +709,33 @@ function SlotsTab({
           })}
         </div>
 
+        {/* All-day events row */}
+        {viewDates.some(d => (gcalAllDayByDate.get(d) || []).length > 0) && (
+          <div className="grid border-b border-gray-200 dark:border-gray-700" style={{ gridTemplateColumns: `60px repeat(${viewDates.length}, 1fr)` }}>
+            <div className="p-1 text-[10px] text-gray-400 dark:text-gray-500 text-center bg-gray-50 dark:bg-gray-900/50 flex items-center justify-center">終日</div>
+            {viewDates.map(date => {
+              const allDayEvs = gcalAllDayByDate.get(date) || [];
+              return (
+                <div key={date} className="border-l border-gray-200 dark:border-gray-700 p-1 min-h-[22px] flex flex-wrap gap-0.5">
+                  {allDayEvs.map(ev => {
+                    const color = getGcalColor(ev.colorId);
+                    return (
+                      <div
+                        key={ev.id}
+                        className="text-[10px] rounded px-1 truncate max-w-full"
+                        style={{ backgroundColor: color + "22", color, border: `1px solid ${color}66` }}
+                        title={ev.title}
+                      >
+                        {ev.title}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* Time grid */}
         <div className="relative grid overflow-y-auto" style={{ gridTemplateColumns: `60px repeat(${viewDates.length}, 1fr)`, height: `${CALENDAR_TIMES.length * 28}px` }}>
           {/* Time labels */}
@@ -748,23 +809,29 @@ function SlotsTab({
                 })}
 
               {/* Google Calendar event blocks */}
-              {(gcalBlocksByDate.get(date) || []).map(({ ev, startIdx, spanCount }) => (
-                <div
-                  key={`gcal-${ev.id}`}
-                  className="absolute left-0.5 right-0.5 rounded-md px-1.5 py-0.5 text-[10px] overflow-hidden z-[5] bg-pink-50 dark:bg-pink-900/30 border border-pink-200 dark:border-pink-800 text-pink-600 dark:text-pink-400 opacity-75 pointer-events-none"
-                  style={{
-                    top: `${startIdx * 28 + 1}px`,
-                    height: `${spanCount * 28 - 2}px`,
-                  }}
-                >
-                  <div className="font-medium leading-tight truncate">
-                    {ev.allDay ? "終日" : `${ev.start.substring(11, 16)}-${ev.end.substring(11, 16)}`}
+              {(gcalBlocksByDate.get(date) || []).map(({ ev, startIdx, spanCount }) => {
+                const color = getGcalColor(ev.colorId);
+                return (
+                  <div
+                    key={`gcal-${ev.id}`}
+                    className="absolute left-0.5 right-0.5 rounded-md px-1.5 py-0.5 text-[10px] overflow-hidden z-[5] opacity-80 pointer-events-none"
+                    style={{
+                      top: `${startIdx * 28 + 1}px`,
+                      height: `${spanCount * 28 - 2}px`,
+                      backgroundColor: color + "22",
+                      borderLeft: `3px solid ${color}`,
+                      color,
+                    }}
+                  >
+                    <div className="font-medium leading-tight truncate">
+                      {`${ev.start.substring(11, 16)}-${ev.end.substring(11, 16)}`}
+                    </div>
+                    {spanCount >= 2 && (
+                      <div className="truncate opacity-80">{ev.title}</div>
+                    )}
                   </div>
-                  {spanCount >= 2 && (
-                    <div className="truncate opacity-80">{ev.title}</div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           ))}
 

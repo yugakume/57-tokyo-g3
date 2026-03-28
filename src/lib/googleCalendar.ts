@@ -4,6 +4,8 @@ export interface CalendarEvent {
   start: string;
   end: string;
   allDay: boolean;
+  colorId?: string;       // Googleカレンダーのカラーラベル (1〜11)
+  backgroundColor?: string; // カレンダー自体のカラー（イベントにcolorIdがない場合）
 }
 
 export async function fetchCalendarEvents(
@@ -35,6 +37,7 @@ export async function fetchCalendarEvents(
         start: start?.dateTime || start?.date || '',
         end: end?.dateTime || end?.date || '',
         allDay: !start?.dateTime,
+        colorId: item.colorId as string | undefined,
       };
     }) ?? []
   );

@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import type { User } from "@/types";
 import { db } from "@/lib/firebase";
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 
 // =============================================
 // 連携済みGoogleカレンダーアカウント
@@ -102,8 +102,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let allowedReady = false;
     let adminReady = false;
 
-    const checkAndRestoreUser = () => {
-      if (!allowedReady || !adminReady) return;
+    // localStorage キャッシュ（10分TTL）でFirestoreリードを節約
+    const SETTINGS_TTL = 10 * 60 * 1000;
+    function loadSettingsCache(key: string): string[] | null {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const { data, ts } = JSON.parse(raw) as { data: string[]; ts: number };
+        return Date.now() - ts < SETTINGS_TTL ? data : null;
+      } catch { return null; }
+    }
+    function saveSettingsCache(key: string, data: string[]) {
+      try { localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() })); } catch { /* ignore */ }
+    }
+
+    async function loadSettings() {
+      // キャッシュ確認
+      const cachedAllowed = loadSettingsCache("portal_settings_allowedEmails");
+      const cachedAdmin   = loadSettingsCache("portal_settings_adminEmails");
+
+      if (cachedAllowed && cachedAdmin) {
+        loadedAllowed = cachedAllowed;
+        loadedAdmin   = cachedAdmin;
+        setAllowedEmails(cachedAllowed);
+        setAdminEmails(cachedAdmin);
+      } else {
+        // Firestoreから一回読み込み
+        const [allowedSnap, adminSnap] = await Promise.all([
+          getDoc(doc(db, "settings", "allowedEmails")),
+          getDoc(doc(db, "settings", "adminEmails")),
+        ]);
+
+        if (allowedSnap.exists()) {
+          loadedAllowed = allowedSnap.data().emails ?? [];
+        } else {
+          await setDoc(doc(db, "settings", "allowedEmails"), { emails: DEFAULT_ADMIN_EMAILS });
+          loadedAllowed = DEFAULT_ADMIN_EMAILS;
+        }
+        setAllowedEmails(loadedAllowed);
+        saveSettingsCache("portal_settings_allowedEmails", loadedAllowed);
+
+        if (adminSnap.exists()) {
+          loadedAdmin = adminSnap.data().emails ?? [];
+        } else {
+          await setDoc(doc(db, "settings", "adminEmails"), { emails: DEFAULT_ADMIN_EMAILS });
+          loadedAdmin = DEFAULT_ADMIN_EMAILS;
+        }
+        setAdminEmails(loadedAdmin);
+        saveSettingsCache("portal_settings_adminEmails", loadedAdmin);
+      }
+
       // localStorageからユーザー復元（許可チェック付き）
       const stored = localStorage.getItem("portal_user");
       if (stored) {
@@ -111,14 +159,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const parsed = JSON.parse(stored);
           const email = parsed.email;
           const domain = email?.split("@")[1];
-          // ドメインチェック + 許可メールチェック
           if (domain === ALLOWED_DOMAIN && (loadedAllowed.includes(email) || loadedAdmin.includes(email))) {
-            // 管理者権限を最新に更新
             parsed.role = loadedAdmin.includes(email) ? "admin" : "member";
             setUser(parsed);
             localStorage.setItem("portal_user", JSON.stringify(parsed));
           } else {
-            // 許可されていないユーザーはログアウト
             localStorage.removeItem("portal_user");
           }
         } catch {
@@ -126,35 +171,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
       setIsLoading(false);
-    };
+    }
 
-    const unsubAllowed = onSnapshot(doc(db, "settings", "allowedEmails"), (snap) => {
-      if (snap.exists()) {
-        loadedAllowed = snap.data().emails ?? [];
-        setAllowedEmails(loadedAllowed);
-      } else {
-        setDoc(doc(db, "settings", "allowedEmails"), { emails: DEFAULT_ADMIN_EMAILS });
-        loadedAllowed = DEFAULT_ADMIN_EMAILS;
-        setAllowedEmails(DEFAULT_ADMIN_EMAILS);
-      }
-      allowedReady = true;
-      checkAndRestoreUser();
-    });
+    loadSettings().catch(() => setIsLoading(false));
 
-    const unsubAdmin = onSnapshot(doc(db, "settings", "adminEmails"), (snap) => {
-      if (snap.exists()) {
-        loadedAdmin = snap.data().emails ?? [];
-        setAdminEmails(loadedAdmin);
-      } else {
-        setDoc(doc(db, "settings", "adminEmails"), { emails: DEFAULT_ADMIN_EMAILS });
-        loadedAdmin = DEFAULT_ADMIN_EMAILS;
-        setAdminEmails(DEFAULT_ADMIN_EMAILS);
-      }
-      adminReady = true;
-      checkAndRestoreUser();
-    });
-
-    return () => { unsubAllowed(); unsubAdmin(); };
+    return () => { /* no subscriptions to clean up */ };
   }, []);
 
   // Google Identity Services スクリプト読み込み
@@ -274,19 +295,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // 管理者用：許可メール管理（Firestore保存）
+  // ※ 書き込み時にキャッシュも更新してリードを節約
   const addAllowedEmail = useCallback(async (email: string) => {
     const next = [...allowedEmails, email].filter((v, i, a) => a.indexOf(v) === i);
+    setAllowedEmails(next);
     await setDoc(doc(db, "settings", "allowedEmails"), { emails: next });
+    try { localStorage.setItem("portal_settings_allowedEmails", JSON.stringify({ data: next, ts: Date.now() })); } catch { /* ignore */ }
   }, [allowedEmails]);
 
   const removeAllowedEmail = useCallback(async (email: string) => {
     const next = allowedEmails.filter(e => e !== email);
+    setAllowedEmails(next);
     await setDoc(doc(db, "settings", "allowedEmails"), { emails: next });
+    try { localStorage.setItem("portal_settings_allowedEmails", JSON.stringify({ data: next, ts: Date.now() })); } catch { /* ignore */ }
   }, [allowedEmails]);
 
   const addAdminEmail = useCallback(async (email: string) => {
     const next = [...adminEmails, email].filter((v, i, a) => a.indexOf(v) === i);
+    setAdminEmails(next);
     await setDoc(doc(db, "settings", "adminEmails"), { emails: next });
+    try { localStorage.setItem("portal_settings_adminEmails", JSON.stringify({ data: next, ts: Date.now() })); } catch { /* ignore */ }
   }, [adminEmails]);
 
   const removeAdminEmail = useCallback(async (email: string) => {
@@ -295,7 +323,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     const next = adminEmails.filter(e => e !== email);
+    setAdminEmails(next);
     await setDoc(doc(db, "settings", "adminEmails"), { emails: next });
+    try { localStorage.setItem("portal_settings_adminEmails", JSON.stringify({ data: next, ts: Date.now() })); } catch { /* ignore */ }
   }, [adminEmails]);
 
   // =============================================

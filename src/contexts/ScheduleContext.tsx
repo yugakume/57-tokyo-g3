@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import type { StaffProfile, TimeSlot, Booking, EventType, BookingStatus, StaffRole } from "@/types";
 import { db } from "@/lib/firebase";
-import { collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch } from "firebase/firestore";
+import { collection, doc, setDoc, deleteDoc, getDocs, writeBatch } from "firebase/firestore";
 import { useAuth } from "@/contexts/AuthContext";
 import { DEMO_STAFF_PROFILES, DEMO_STAFF_ROLES, DEMO_TIME_SLOTS, DEMO_BOOKINGS } from "@/lib/demoData";
 
@@ -79,6 +79,28 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
 
   const [loaded, setLoaded] = useState(false);
 
+  // =============================================
+  // キャッシュ付き一回読み込み（Firestoreリード節約）
+  // localStorage に保存、5分間は再フェッチしない
+  // =============================================
+  const CACHE_TTL = 5 * 60 * 1000; // 5分
+
+  function loadCache<T>(key: string): T[] | null {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const { data, ts } = JSON.parse(raw) as { data: T[]; ts: number };
+      if (Date.now() - ts > CACHE_TTL) return null; // 期限切れ
+      return data;
+    } catch { return null; }
+  }
+
+  function saveCache<T>(key: string, data: T[]) {
+    try {
+      localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() }));
+    } catch { /* ignore */ }
+  }
+
   useEffect(() => {
     if (isLoading) return;
 
@@ -92,47 +114,54 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Firestoreリアルタイムリスナー（実ユーザーのみ）
-    const unsubs: (() => void)[] = [];
-    let profilesLoaded = false;
-    let slotsLoaded = false;
-    let bookingsLoaded = false;
-    let rolesLoaded = false;
+    // キャッシュから復元できればFirestoreを読まない
+    const cachedProfiles = loadCache<StaffProfile>("portal_staffProfiles");
+    const cachedSlots    = loadCache<TimeSlot>("portal_timeSlots");
+    const cachedBookings = loadCache<Booking>("portal_bookings");
+    const cachedRoles    = loadCache<StaffRole>("portal_staffRoles");
 
-    // staffProfiles
-    unsubs.push(onSnapshot(collection(db, "staffProfiles"), (snap) => {
-      setStaffProfiles(snap.docs.map(d => ({ ...d.data(), id: d.id })) as StaffProfile[]);
-      profilesLoaded = true;
-      checkLoaded();
-    }));
-
-    // timeSlots
-    unsubs.push(onSnapshot(collection(db, "timeSlots"), (snap) => {
-      setTimeSlots(snap.docs.map(d => ({ ...d.data(), id: d.id })) as TimeSlot[]);
-      slotsLoaded = true;
-      checkLoaded();
-    }));
-
-    // bookings
-    unsubs.push(onSnapshot(collection(db, "bookings"), (snap) => {
-      setBookings(snap.docs.map(d => ({ ...d.data(), id: d.id })) as Booking[]);
-      bookingsLoaded = true;
-      checkLoaded();
-    }));
-
-    // staffRoles
-    unsubs.push(onSnapshot(collection(db, "staffRoles"), (snap) => {
-      setStaffRoles(snap.docs.map(d => ({ ...d.data(), id: d.id })) as StaffRole[]);
-      rolesLoaded = true;
-      checkLoaded();
-    }));
-
-    function checkLoaded() {
-      if (profilesLoaded && slotsLoaded && bookingsLoaded && rolesLoaded) setLoaded(true);
+    if (cachedProfiles && cachedSlots && cachedBookings && cachedRoles) {
+      setStaffProfiles(cachedProfiles);
+      setTimeSlots(cachedSlots);
+      setBookings(cachedBookings);
+      setStaffRoles(cachedRoles);
+      setLoaded(true);
+      return;
     }
 
-    return () => unsubs.forEach(u => u());
+    // Firestoreから一回だけ読み込む（getDocs）
+    async function fetchAll() {
+      const [profilesSnap, slotsSnap, bookingsSnap, rolesSnap] = await Promise.all([
+        getDocs(collection(db, "staffProfiles")),
+        getDocs(collection(db, "timeSlots")),
+        getDocs(collection(db, "bookings")),
+        getDocs(collection(db, "staffRoles")),
+      ]);
+      const profiles = profilesSnap.docs.map(d => ({ ...d.data(), id: d.id })) as StaffProfile[];
+      const slots    = slotsSnap.docs.map(d => ({ ...d.data(), id: d.id })) as TimeSlot[];
+      const bks      = bookingsSnap.docs.map(d => ({ ...d.data(), id: d.id })) as Booking[];
+      const roles    = rolesSnap.docs.map(d => ({ ...d.data(), id: d.id })) as StaffRole[];
+
+      saveCache("portal_staffProfiles", profiles);
+      saveCache("portal_timeSlots", slots);
+      saveCache("portal_bookings", bks);
+      saveCache("portal_staffRoles", roles);
+
+      setStaffProfiles(profiles);
+      setTimeSlots(slots);
+      setBookings(bks);
+      setStaffRoles(roles);
+      setLoaded(true);
+    }
+
+    fetchAll().catch(console.error);
   }, [isDemoUser, isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 書き込み後もキャッシュを常に最新に保つ（次回ロード時に使用）
+  useEffect(() => { if (loaded && !isDemoUser) saveCache("portal_staffProfiles", staffProfiles); }, [staffProfiles, loaded, isDemoUser]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (loaded && !isDemoUser) saveCache("portal_timeSlots", timeSlots); }, [timeSlots, loaded, isDemoUser]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (loaded && !isDemoUser) saveCache("portal_bookings", bookings); }, [bookings, loaded, isDemoUser]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (loaded && !isDemoUser) saveCache("portal_staffRoles", staffRoles); }, [staffRoles, loaded, isDemoUser]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // =============================================
   // ロール管理
