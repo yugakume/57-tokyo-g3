@@ -5,7 +5,7 @@
 // =============================================
 
 import type {
-  LinkItem, LinkCategory, AccountInfo, Announcement, AnnouncementCategory,
+  LinkItem, LinkCategory, AccountInfo, InstagramAccount, Announcement, AnnouncementCategory,
   StaffProfile, StaffRole, TimeSlot, Booking, MeetingMinutes, Task,
 } from "@/types";
 import type { CountdownItem } from "@/contexts/CountdownContext";
@@ -50,6 +50,24 @@ export const DEMO_ACCOUNTS: AccountInfo[] = [
     loginId: "57tokyo_sample",
     password: "※デモモードではパスワードは表示されません",
     url: "https://example.com", order: 2,
+  },
+];
+
+export const DEMO_INSTA_ACCOUNTS: InstagramAccount[] = [
+  {
+    id: "demo-insta-1",
+    handle: "dotjp_sample1",
+    email: "sample1@dot-jp.or.jp",
+    password: "※デモモードではパスワードは表示されません",
+    note: "集客メインアカウント（サンプル）",
+    loggedInUsers: ["demo_tanaka@dot-jp.or.jp", "demo_sato@dot-jp.or.jp"],
+    order: 1,
+  },
+  {
+    id: "demo-insta-2",
+    handle: "dotjp_sample2",
+    loggedInUsers: ["demo_yamada@dot-jp.or.jp"],
+    order: 2,
   },
 ];
 

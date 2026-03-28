@@ -46,6 +46,16 @@ export interface AccountInfo {
   order: number;
 }
 
+export interface InstagramAccount {
+  id: string;
+  handle: string;          // @なし（例: yugaapple）— 必須
+  email?: string;          // 任意
+  password?: string;       // 任意
+  note?: string;           // 任意
+  loggedInUsers: string[]; // ログイン中のメンバーのメールアドレス配列
+  order: number;
+}
+
 export interface Announcement {
   id: string;
   title: string;

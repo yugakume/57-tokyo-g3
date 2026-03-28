@@ -8,17 +8,18 @@ import { useSchedule } from "@/contexts/ScheduleContext";
 import { useCountdown } from "@/contexts/CountdownContext";
 import Toast from "@/components/Toast";
 import { LinkIcon, PlusIcon, TrashIcon, EditIcon, CloseIcon } from "@/components/Icons";
-import type { LinkItem, LinkIconType, AccountInfo, Announcement, AnnouncementCategory } from "@/types";
+import type { LinkItem, LinkIconType, AccountInfo, InstagramAccount, Announcement, AnnouncementCategory } from "@/types";
 
 type Tab = "links" | "categories" | "accounts" | "users" | "roles" | "announcements" | "announcementCategories" | "countdowns";
 
 export default function AdminPage() {
   const { user, isLoading, isAdmin, allowedEmails, adminEmails, addAllowedEmail, removeAllowedEmail, addAdminEmail, removeAdminEmail } = useAuth();
   const {
-    links, categories, accounts, announcements, announcementCategories,
+    links, categories, accounts, instaAccounts, announcements, announcementCategories,
     addLink, updateLink, deleteLink,
     addCategory, updateCategory, deleteCategory,
     addAccount, updateAccount, deleteAccount,
+    addInstaAccount, updateInstaAccount, deleteInstaAccount,
     addAnnouncement, updateAnnouncement, deleteAnnouncement,
     addAnnouncementCategory, updateAnnouncementCategory, deleteAnnouncementCategory,
   } = useData();
@@ -40,6 +41,12 @@ export default function AdminPage() {
   const [showAccForm, setShowAccForm] = useState(false);
   const [editingAcc, setEditingAcc] = useState<AccountInfo | null>(null);
   const [accForm, setAccForm] = useState({ serviceName: "", loginId: "", password: "", url: "", note: "", order: 0 });
+
+  // Insta account form state
+  const [accSubTab, setAccSubTab] = useState<"site" | "insta">("site");
+  const [showInstaForm, setShowInstaForm] = useState(false);
+  const [editingInsta, setEditingInsta] = useState<InstagramAccount | null>(null);
+  const [instaForm, setInstaForm] = useState({ handle: "", email: "", password: "", note: "", loggedInUsers: [] as string[], order: 0 });
 
   // Announcement form state
   const [showAnnForm, setShowAnnForm] = useState(false);
@@ -198,6 +205,55 @@ export default function AdminPage() {
       deleteAccount(id);
       setToast("アカウントを削除しました");
     }
+  };
+
+  // Insta account handlers
+  const openInstaForm = (acc?: InstagramAccount) => {
+    if (acc) {
+      setEditingInsta(acc);
+      setInstaForm({ handle: acc.handle, email: acc.email ?? "", password: acc.password ?? "", note: acc.note ?? "", loggedInUsers: acc.loggedInUsers, order: acc.order });
+    } else {
+      setEditingInsta(null);
+      setInstaForm({ handle: "", email: "", password: "", note: "", loggedInUsers: [], order: instaAccounts.length + 1 });
+    }
+    setShowInstaForm(true);
+  };
+
+  const saveInstaForm = () => {
+    const handle = instaForm.handle.replace(/^@/, "").trim();
+    if (!handle) return;
+    const data = {
+      handle,
+      email: instaForm.email.trim() || undefined,
+      password: instaForm.password || undefined,
+      note: instaForm.note.trim() || undefined,
+      loggedInUsers: instaForm.loggedInUsers,
+      order: instaForm.order,
+    };
+    if (editingInsta) {
+      updateInstaAccount(editingInsta.id, data);
+      setToast("インスタアカウントを更新しました");
+    } else {
+      addInstaAccount(data);
+      setToast("インスタアカウントを追加しました");
+    }
+    setShowInstaForm(false);
+  };
+
+  const handleDeleteInsta = (id: string) => {
+    if (confirm("このインスタアカウントを削除しますか？")) {
+      deleteInstaAccount(id);
+      setToast("インスタアカウントを削除しました");
+    }
+  };
+
+  const toggleInstaUser = (email: string) => {
+    setInstaForm(prev => ({
+      ...prev,
+      loggedInUsers: prev.loggedInUsers.includes(email)
+        ? prev.loggedInUsers.filter(e => e !== email)
+        : [...prev.loggedInUsers, email],
+    }));
   };
 
   // User management handlers
@@ -462,41 +518,96 @@ export default function AdminPage() {
         {/* Accounts tab */}
         {activeTab === "accounts" && (
           <div>
-            <div className="flex justify-between items-center mb-4">
-              <p className="text-sm text-gray-500 dark:text-gray-400">{accounts.length}件のアカウント</p>
-              <button onClick={() => openAccForm()} className="flex items-center gap-1.5 bg-blue-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors">
-                <PlusIcon className="w-4 h-4" /> 新規追加
+            {/* Sub-tabs */}
+            <div className="flex gap-1 mb-4 bg-gray-100 dark:bg-gray-700/50 p-1 rounded-xl w-fit">
+              <button
+                onClick={() => setAccSubTab("site")}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${accSubTab === "site" ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"}`}
+              >
+                サイト
+              </button>
+              <button
+                onClick={() => setAccSubTab("insta")}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${accSubTab === "insta" ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"}`}
+              >
+                インスタ
               </button>
             </div>
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-700">
-              {(() => { const sortedAccounts = [...accounts].sort((a, b) => a.order - b.order); return sortedAccounts.map((acc, idx) => (
-                <div
-                  key={acc.id}
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 dark:hover:bg-gray-700/50"
-                  draggable
-                  onDragStart={() => { dragItem.current = idx; }}
-                  onDragOver={(e) => { e.preventDefault(); dragOverItem.current = idx; }}
-                  onDrop={() => handleDrop(sortedAccounts, updateAccount)}
-                  onDragEnd={() => { dragItem.current = null; dragOverItem.current = null; }}
-                >
-                  <div className="cursor-grab active:cursor-grabbing shrink-0 text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors">
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{acc.serviceName}</p>
-                    <p className="text-xs text-gray-400">{acc.loginId}</p>
-                  </div>
-                  <div className="flex gap-1 shrink-0">
-                    <button onClick={() => openAccForm(acc)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors">
-                      <EditIcon />
-                    </button>
-                    <button onClick={() => handleDeleteAcc(acc.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors">
-                      <TrashIcon />
-                    </button>
-                  </div>
+
+            {/* Site accounts */}
+            {accSubTab === "site" && (
+              <div>
+                <div className="flex justify-between items-center mb-3">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{accounts.length}件</p>
+                  <button onClick={() => openAccForm()} className="flex items-center gap-1.5 bg-blue-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+                    <PlusIcon className="w-4 h-4" /> 新規追加
+                  </button>
                 </div>
-              )); })()}
-            </div>
+                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-700">
+                  {(() => { const sortedAccounts = [...accounts].sort((a, b) => a.order - b.order); return sortedAccounts.map((acc, idx) => (
+                    <div
+                      key={acc.id}
+                      className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 dark:hover:bg-gray-700/50"
+                      draggable
+                      onDragStart={() => { dragItem.current = idx; }}
+                      onDragOver={(e) => { e.preventDefault(); dragOverItem.current = idx; }}
+                      onDrop={() => handleDrop(sortedAccounts, updateAccount)}
+                      onDragEnd={() => { dragItem.current = null; dragOverItem.current = null; }}
+                    >
+                      <div className="cursor-grab active:cursor-grabbing shrink-0 text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors">
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{acc.serviceName}</p>
+                        <p className="text-xs text-gray-400">{acc.loginId}</p>
+                      </div>
+                      <div className="flex gap-1 shrink-0">
+                        <button onClick={() => openAccForm(acc)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors">
+                          <EditIcon />
+                        </button>
+                        <button onClick={() => handleDeleteAcc(acc.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors">
+                          <TrashIcon />
+                        </button>
+                      </div>
+                    </div>
+                  )); })()}
+                </div>
+              </div>
+            )}
+
+            {/* Instagram accounts */}
+            {accSubTab === "insta" && (
+              <div>
+                <div className="flex justify-between items-center mb-3">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{instaAccounts.length}件</p>
+                  <button onClick={() => openInstaForm()} className="flex items-center gap-1.5 bg-pink-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-pink-700 transition-colors">
+                    <PlusIcon className="w-4 h-4" /> 新規追加
+                  </button>
+                </div>
+                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-50 dark:divide-gray-700">
+                  {[...instaAccounts].sort((a, b) => a.order - b.order).map((acc) => (
+                    <div key={acc.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 dark:hover:bg-gray-700/50">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">@{acc.handle}</p>
+                        <p className="text-xs text-gray-400">
+                          {acc.loggedInUsers.length > 0
+                            ? `ログイン中: ${acc.loggedInUsers.map(e => { const p = staffProfiles.find(p => p.email === e); return p ? (p.fullName || p.lastName) : e; }).join(", ")}`
+                            : "ログイン中なし"}
+                        </p>
+                      </div>
+                      <div className="flex gap-1 shrink-0">
+                        <button onClick={() => openInstaForm(acc)} className="p-1.5 text-gray-400 hover:text-pink-600 hover:bg-pink-50 dark:hover:bg-pink-900/30 rounded transition-colors">
+                          <EditIcon />
+                        </button>
+                        <button onClick={() => handleDeleteInsta(acc.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors">
+                          <TrashIcon />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
         {/* Announcements tab */}
@@ -1197,6 +1308,59 @@ export default function AdminPage() {
             <div className="flex gap-2 pt-2">
               <button onClick={() => setShowAccForm(false)} className="flex-1 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">キャンセル</button>
               <button onClick={saveAccForm} className="flex-1 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">保存</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Instagram Account Modal */}
+      {showInstaForm && (
+        <Modal title={editingInsta ? "インスタアカウントを編集" : "インスタアカウントを追加"} onClose={() => setShowInstaForm(false)}>
+          <div className="space-y-3">
+            <FormField label="アカウントID（必須）">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm select-none">@</span>
+                <input
+                  value={instaForm.handle}
+                  onChange={e => setInstaForm(f => ({ ...f, handle: e.target.value.replace(/^@/, "") }))}
+                  className="form-input pl-7"
+                  placeholder="yugaapple"
+                />
+              </div>
+            </FormField>
+            <FormField label="メールアドレス（任意）">
+              <input value={instaForm.email} onChange={e => setInstaForm(f => ({ ...f, email: e.target.value }))} className="form-input" placeholder="example@gmail.com" />
+            </FormField>
+            <FormField label="パスワード（任意）">
+              <input value={instaForm.password} onChange={e => setInstaForm(f => ({ ...f, password: e.target.value }))} className="form-input" placeholder="パスワード" />
+            </FormField>
+            <FormField label="備考（任意）">
+              <input value={instaForm.note} onChange={e => setInstaForm(f => ({ ...f, note: e.target.value }))} className="form-input" placeholder="例: 集客メインアカウント" />
+            </FormField>
+            <FormField label="ログイン中のメンバー（複数選択可）">
+              <div className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                {staffProfiles.length === 0 ? (
+                  <p className="text-xs text-gray-400 px-3 py-2">メンバーが登録されていません</p>
+                ) : [...staffProfiles].sort((a, b) => (a.fullName || a.lastName).localeCompare(b.fullName || b.lastName)).map(p => (
+                  <label key={p.email} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={instaForm.loggedInUsers.includes(p.email)}
+                      onChange={() => toggleInstaUser(p.email)}
+                      className="rounded"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{p.fullName || p.lastName}</span>
+                    <span className="text-xs text-gray-400 ml-auto">{p.email}</span>
+                  </label>
+                ))}
+              </div>
+            </FormField>
+            <FormField label="表示順">
+              <input type="number" value={instaForm.order} onChange={e => setInstaForm(f => ({ ...f, order: Number(e.target.value) }))} className="form-input" />
+            </FormField>
+            <div className="flex gap-2 pt-2">
+              <button onClick={() => setShowInstaForm(false)} className="flex-1 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">キャンセル</button>
+              <button onClick={saveInstaForm} disabled={!instaForm.handle.trim()} className="flex-1 py-2 text-sm bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">保存</button>
             </div>
           </div>
         </Modal>

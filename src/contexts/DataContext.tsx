@@ -3,10 +3,10 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import type { LinkItem, LinkCategory, AccountInfo, Announcement, AnnouncementCategory } from "@/types";
+import type { LinkItem, LinkCategory, AccountInfo, InstagramAccount, Announcement, AnnouncementCategory } from "@/types";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  DEMO_LINKS, DEMO_LINK_CATEGORIES, DEMO_ACCOUNTS,
+  DEMO_LINKS, DEMO_LINK_CATEGORIES, DEMO_ACCOUNTS, DEMO_INSTA_ACCOUNTS,
   DEMO_ANNOUNCEMENTS, DEMO_ANNOUNCEMENT_CATEGORIES,
 } from "@/lib/demoData";
 
@@ -14,6 +14,7 @@ interface DataContextType {
   links: LinkItem[];
   categories: LinkCategory[];
   accounts: AccountInfo[];
+  instaAccounts: InstagramAccount[];
   announcements: Announcement[];
   announcementCategories: AnnouncementCategory[];
   addLink: (link: Omit<LinkItem, "id" | "createdAt" | "updatedAt">) => Promise<void>;
@@ -25,6 +26,9 @@ interface DataContextType {
   addAccount: (account: Omit<AccountInfo, "id">) => Promise<void>;
   updateAccount: (id: string, account: Partial<AccountInfo>) => Promise<void>;
   deleteAccount: (id: string) => Promise<void>;
+  addInstaAccount: (account: Omit<InstagramAccount, "id">) => Promise<void>;
+  updateInstaAccount: (id: string, updates: Partial<InstagramAccount>) => Promise<void>;
+  deleteInstaAccount: (id: string) => Promise<void>;
   addAnnouncement: (announcement: Omit<Announcement, "id">) => Promise<void>;
   updateAnnouncement: (id: string, announcement: Partial<Announcement>) => Promise<void>;
   deleteAnnouncement: (id: string) => Promise<void>;
@@ -42,10 +46,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [links, setLinks] = useState<LinkItem[]>([]);
   const [categories, setCategories] = useState<LinkCategory[]>([]);
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
+  const [instaAccounts, setInstaAccounts] = useState<InstagramAccount[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [announcementCategories, setAnnouncementCategories] = useState<AnnouncementCategory[]>([]);
   const [loadedCount, setLoadedCount] = useState(0);
-  const loaded = loadedCount >= 5;
+  const loaded = loadedCount >= 6;
 
   // デモユーザーはダミーデータを使用
   useEffect(() => {
@@ -54,6 +59,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setLinks(DEMO_LINKS);
       setCategories(DEMO_LINK_CATEGORIES);
       setAccounts(DEMO_ACCOUNTS);
+      setInstaAccounts(DEMO_INSTA_ACCOUNTS);
       setAnnouncements(DEMO_ANNOUNCEMENTS);
       setAnnouncementCategories(DEMO_ANNOUNCEMENT_CATEGORIES);
       return;
@@ -80,6 +86,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
     unsubs.push(onSnapshot(collection(db, "accounts"), (snap) => {
       const data = snap.docs.map(d => ({ ...d.data(), id: d.id })) as AccountInfo[];
       setAccounts(data);
+      setLoadedCount(prev => prev + 1);
+    }));
+
+    // Instagram Accounts
+    unsubs.push(onSnapshot(collection(db, "instaAccounts"), (snap) => {
+      const data = snap.docs.map(d => ({ ...d.data(), id: d.id })) as InstagramAccount[];
+      setInstaAccounts(data);
       setLoadedCount(prev => prev + 1);
     }));
 
@@ -155,6 +168,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
     await deleteDoc(doc(db, "accounts", id));
   }, [isDemoUser]);
 
+  // --- Instagram Accounts ---
+  const addInstaAccount = useCallback(async (account: Omit<InstagramAccount, "id">) => {
+    if (isDemoUser) return;
+    const id = `insta-${Date.now()}`;
+    await setDoc(doc(db, "instaAccounts", id), { ...account, id });
+  }, [isDemoUser]);
+
+  const updateInstaAccount = useCallback(async (id: string, updates: Partial<InstagramAccount>) => {
+    if (isDemoUser) return;
+    await updateDoc(doc(db, "instaAccounts", id), updates);
+  }, [isDemoUser]);
+
+  const deleteInstaAccount = useCallback(async (id: string) => {
+    if (isDemoUser) return;
+    await deleteDoc(doc(db, "instaAccounts", id));
+  }, [isDemoUser]);
+
   // --- Announcements ---
   const addAnnouncement = useCallback(async (announcement: Omit<Announcement, "id">) => {
     if (isDemoUser) return;
@@ -191,10 +221,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   return (
     <DataContext.Provider value={{
-      links, categories, accounts, announcements, announcementCategories,
+      links, categories, accounts, instaAccounts, announcements, announcementCategories,
       addLink, updateLink, deleteLink,
       addCategory, updateCategory, deleteCategory,
       addAccount, updateAccount, deleteAccount,
+      addInstaAccount, updateInstaAccount, deleteInstaAccount,
       addAnnouncement, updateAnnouncement, deleteAnnouncement,
       addAnnouncementCategory, updateAnnouncementCategory, deleteAnnouncementCategory,
     }}>
