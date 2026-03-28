@@ -6,7 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useMeetingMinutes } from "@/contexts/MeetingMinutesContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
 import { PlusIcon, CloseIcon, TrashIcon, EditIcon, ChevronIcon, ExternalLinkIcon, SearchIcon } from "@/components/Icons";
-import type { MeetingMinutes, MeetingLocation, AgendaItem } from "@/types";
+import type { MeetingMinutes, MeetingLocation, AgendaItem, AttendanceStatus } from "@/types";
 
 // =============================================
 // 時間オプション（30分刻み）
@@ -52,7 +52,7 @@ function getNextSaturday(): string {
 export default function MeetingPage() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
-  const { minutes, addMinutes, updateMinutes, deleteMinutes, updateAttendance } = useMeetingMinutes();
+  const { minutes, addMinutes, updateMinutes, deleteMinutes, updateAttendance, updateAttendanceNote } = useMeetingMinutes();
   const { staffProfiles, staffRoles } = useSchedule();
 
   // 現在のユーザーのスタッフプロフィール（最寄駅取得用）
@@ -228,6 +228,7 @@ export default function MeetingPage() {
                     userEmail={user.email}
                     staffProfiles={staffProfiles}
                     onUpdateAttendance={updateAttendance}
+                    onUpdateAttendanceNote={updateAttendanceNote}
                     isExpanded={expandedId === m.id}
                     onToggle={() => setExpandedId(expandedId === m.id ? null : m.id)}
                     onEdit={() => setEditingMinutes(m)}
@@ -295,6 +296,7 @@ function MeetingCard({
   userEmail,
   staffProfiles,
   onUpdateAttendance,
+  onUpdateAttendanceNote,
   isExpanded,
   onToggle,
   onEdit,
@@ -304,7 +306,8 @@ function MeetingCard({
   myNearestStation?: string;
   userEmail: string;
   staffProfiles: { id: string; email: string; lastName: string; fullName?: string }[];
-  onUpdateAttendance: (id: string, email: string, status: "出席" | "欠席" | "遅刻" | "未回答") => void;
+  onUpdateAttendance: (id: string, email: string, status: AttendanceStatus | "未回答") => void;
+  onUpdateAttendanceNote: (id: string, email: string, note: string) => void;
   isExpanded: boolean;
   onToggle: () => void;
   onEdit: () => void;
@@ -313,11 +316,16 @@ function MeetingCard({
   const isPast = m.date < new Date().toISOString().split("T")[0];
   const myStatus = m.attendance?.[userEmail];
   const [showMinutes, setShowMinutes] = useState(false);
+  const [note, setNote] = useState(m.attendanceNotes?.[userEmail] ?? "");
+  const isHybrid = m.location === "ハイブリッド";
+  const attendanceStatuses: AttendanceStatus[] = isHybrid
+    ? ["対面で出席", "オンラインで出席", "欠席", "遅刻"]
+    : ["出席", "欠席", "遅刻"];
   const attendanceCounts = useMemo(() => {
     const att = m.attendance || {};
     const values = Object.values(att);
     return {
-      attend: values.filter(v => v === "出席").length,
+      attend: values.filter(v => v === "出席" || v === "対面で出席" || v === "オンラインで出席").length,
       absent: values.filter(v => v === "欠席").length,
       late: values.filter(v => v === "遅刻").length,
     };
@@ -416,43 +424,60 @@ function MeetingCard({
             {/* 2. 出欠回答 */}
             <div>
               <p className="text-xs font-medium text-gray-500 mb-2">出欠回答</p>
-              <div className="flex items-center gap-2 mb-2">
-                {(["出席", "欠席", "遅刻"] as const).map(status => {
+              <div className="flex items-center gap-2 flex-wrap mb-2">
+                {attendanceStatuses.map(status => {
                   const isActive = myStatus === status;
-                  const colors: Record<string, string> = {
-                    "出席": isActive ? "bg-green-600 text-white border-green-600" : "bg-white text-green-700 border-green-300 hover:bg-green-50",
-                    "欠席": isActive ? "bg-red-600 text-white border-red-600" : "bg-white text-red-700 border-red-300 hover:bg-red-50",
-                    "遅刻": isActive ? "bg-yellow-500 text-white border-yellow-500" : "bg-white text-yellow-700 border-yellow-300 hover:bg-yellow-50",
+                  const colorMap: Record<string, { active: string; inactive: string }> = {
+                    "出席":         { active: "bg-green-600 text-white border-green-600", inactive: "bg-white dark:bg-gray-700 text-green-700 dark:text-green-300 border-green-300 hover:bg-green-50" },
+                    "対面で出席":   { active: "bg-green-600 text-white border-green-600", inactive: "bg-white dark:bg-gray-700 text-green-700 dark:text-green-300 border-green-300 hover:bg-green-50" },
+                    "オンラインで出席": { active: "bg-blue-600 text-white border-blue-600", inactive: "bg-white dark:bg-gray-700 text-blue-700 dark:text-blue-300 border-blue-300 hover:bg-blue-50" },
+                    "欠席":         { active: "bg-red-600 text-white border-red-600",   inactive: "bg-white dark:bg-gray-700 text-red-700 dark:text-red-300 border-red-300 hover:bg-red-50" },
+                    "遅刻":         { active: "bg-yellow-500 text-white border-yellow-500", inactive: "bg-white dark:bg-gray-700 text-yellow-700 dark:text-yellow-300 border-yellow-300 hover:bg-yellow-50" },
                   };
+                  const c = colorMap[status];
                   return (
                     <button
                       key={status}
                       onClick={() => onUpdateAttendance(m.id, userEmail, isActive ? "未回答" : status)}
-                      className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${colors[status]}`}
+                      className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${isActive ? c.active : c.inactive}`}
                     >
                       {status}
                     </button>
                   );
                 })}
               </div>
+              {/* 備考欄 */}
+              <div className="mb-2">
+                <textarea
+                  value={note}
+                  onChange={e => setNote(e.target.value)}
+                  onBlur={() => onUpdateAttendanceNote(m.id, userEmail, note)}
+                  placeholder="備考（任意）例: 10時ごろ途中参加、家庭の事情で欠席 等"
+                  rows={2}
+                  className="w-full px-3 py-2 text-xs border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                />
+              </div>
               <div className="flex items-center gap-3 text-xs text-gray-500">
                 <span>出席 <span className="font-semibold text-green-600">{attendanceCounts.attend}名</span></span>
                 <span>欠席 <span className="font-semibold text-red-600">{attendanceCounts.absent}名</span></span>
                 <span>遅刻 <span className="font-semibold text-yellow-600">{attendanceCounts.late}名</span></span>
               </div>
-              {/* Show individual attendance responses */}
+              {/* 全員の出欠一覧 */}
               {m.attendance && Object.keys(m.attendance).length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {Object.entries(m.attendance).map(([email, status]) => {
                     const name = emailToName[email] || email;
                     const statusColors: Record<string, string> = {
                       "出席": "bg-green-100 text-green-700",
+                      "対面で出席": "bg-green-100 text-green-700",
+                      "オンラインで出席": "bg-blue-100 text-blue-700",
                       "欠席": "bg-red-100 text-red-700",
                       "遅刻": "bg-yellow-100 text-yellow-700",
                     };
+                    const noteText = m.attendanceNotes?.[email];
                     return (
-                      <span key={email} className={`px-2 py-0.5 text-xs rounded-full ${statusColors[status] || "bg-gray-100 text-gray-600"}`}>
-                        {name}: {status}
+                      <span key={email} className={`px-2 py-0.5 text-xs rounded-full ${statusColors[status] || "bg-gray-100 text-gray-600"}`} title={noteText}>
+                        {name}: {status}{noteText ? " 💬" : ""}
                       </span>
                     );
                   })}

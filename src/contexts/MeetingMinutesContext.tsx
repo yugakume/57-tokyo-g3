@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, useRef, ReactNode, useCallback } from "react";
-import type { MeetingMinutes } from "@/types";
+import type { MeetingMinutes, AttendanceStatus } from "@/types";
 import { db } from "@/lib/firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,7 +16,8 @@ interface MeetingMinutesContextType {
   addMinutes: (m: Omit<MeetingMinutes, "id" | "createdAt" | "updatedAt">) => void;
   updateMinutes: (id: string, updates: Partial<MeetingMinutes>) => void;
   deleteMinutes: (id: string) => void;
-  updateAttendance: (id: string, email: string, status: "出席" | "欠席" | "遅刻" | "未回答") => void;
+  updateAttendance: (id: string, email: string, status: AttendanceStatus | "未回答") => void;
+  updateAttendanceNote: (id: string, email: string, note: string) => void;
 }
 
 const MeetingMinutesContext = createContext<MeetingMinutesContextType | undefined>(undefined);
@@ -69,7 +70,7 @@ export function MeetingMinutesProvider({ children }: { children: ReactNode }) {
     deleteDoc(doc(db, "meetingMinutes", id));
   }, [isDemoUser]);
 
-  const updateAttendance = useCallback((id: string, email: string, status: "出席" | "欠席" | "遅刻" | "未回答") => {
+  const updateAttendance = useCallback((id: string, email: string, status: AttendanceStatus | "未回答") => {
     if (isDemoUser) return;
     const target = minutesRef.current.find(m => m.id === id);
     if (!target) return;
@@ -80,12 +81,24 @@ export function MeetingMinutesProvider({ children }: { children: ReactNode }) {
     } else {
       attendance[email] = status;
     }
-    // onSnapshot handles the state update via Firestore latency compensation
     setDoc(doc(db, "meetingMinutes", id), { attendance, updatedAt }, { merge: true });
   }, [isDemoUser]);
 
+  const updateAttendanceNote = useCallback((id: string, email: string, note: string) => {
+    if (isDemoUser) return;
+    const target = minutesRef.current.find(m => m.id === id);
+    if (!target) return;
+    const attendanceNotes = { ...(target.attendanceNotes || {}) };
+    if (!note.trim()) {
+      delete attendanceNotes[email];
+    } else {
+      attendanceNotes[email] = note.trim();
+    }
+    setDoc(doc(db, "meetingMinutes", id), { attendanceNotes, updatedAt: new Date().toISOString() }, { merge: true });
+  }, [isDemoUser]);
+
   return (
-    <MeetingMinutesContext.Provider value={{ minutes, addMinutes, updateMinutes, deleteMinutes, updateAttendance }}>
+    <MeetingMinutesContext.Provider value={{ minutes, addMinutes, updateMinutes, deleteMinutes, updateAttendance, updateAttendanceNote }}>
       {children}
     </MeetingMinutesContext.Provider>
   );

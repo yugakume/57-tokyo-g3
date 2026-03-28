@@ -165,6 +165,7 @@ export interface Booking {
 // =============================================
 
 export type MeetingLocation = "対面" | "オンライン" | "ハイブリッド";
+export type AttendanceStatus = "出席" | "対面で出席" | "オンラインで出席" | "欠席" | "遅刻";
 
 export interface AgendaItem {
   id: string;
@@ -186,7 +187,8 @@ export interface MeetingMinutes {
   venue?: string;          // 会場名
   venueStation?: string;   // 会場最寄駅
   attendees: string[];    // 出席者名
-  attendance?: Record<string, "出席" | "欠席" | "遅刻" | "未回答">; // email -> status
+  attendance?: Record<string, AttendanceStatus>; // email -> status
+  attendanceNotes?: Record<string, string>;       // email -> 備考
   agenda?: AgendaItem[];  // アジェンダ（出席者と議事録の間）
   content: string;        // 議事録本文
   createdBy: string;      // user email

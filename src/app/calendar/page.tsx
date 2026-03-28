@@ -8,7 +8,7 @@ import { useSchedule } from "@/contexts/ScheduleContext";
 import { useTask } from "@/contexts/TaskContext";
 import { useCountdown } from "@/contexts/CountdownContext";
 import { ChevronIcon, CloseIcon } from "@/components/Icons";
-import type { MeetingMinutes as MeetingMinutesType } from "@/types";
+import type { MeetingMinutes as MeetingMinutesType, AttendanceStatus } from "@/types";
 
 // =============================================
 // 型定義
@@ -433,22 +433,27 @@ export default function CalendarPage() {
             ) : (
               <div className="space-y-3">
                 {selectedEvents.map(event => {
-                  // Find the matching MTG for attendance
                   const mtgMatch = event.type === "mtg" && selectedDate
                     ? (mtgByDate[selectedDate] || []).find(m => event.id === `mtg-${m.id}`)
                     : null;
                   const myStatus = mtgMatch?.attendance?.[user.email];
+                  const isHybrid = mtgMatch?.location === "ハイブリッド";
+                  const attendanceStatuses: (AttendanceStatus | never)[] = isHybrid
+                    ? ["対面で出席", "オンラインで出席", "欠席", "遅刻"]
+                    : ["出席", "欠席", "遅刻"];
+
+                  const navPath = event.type === "mtg" ? "/meeting" : event.type === "orientation" ? "/book" : null;
+
+                  const borderColor = event.type === "mtg"
+                    ? "border-purple-200 dark:border-purple-700"
+                    : event.type === "orientation"
+                    ? "border-blue-200 dark:border-blue-700"
+                    : "border-orange-200 dark:border-orange-700";
 
                   return (
                     <div
                       key={event.id}
-                      className={`rounded-lg p-3 ${typeColor[event.type].bg} border ${
-                        event.type === "mtg"
-                          ? "border-purple-200 dark:border-purple-700"
-                          : event.type === "orientation"
-                          ? "border-blue-200 dark:border-blue-700"
-                          : "border-orange-200 dark:border-orange-700"
-                      }`}
+                      className={`rounded-lg p-3 ${typeColor[event.type].bg} border ${borderColor}`}
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <span className={`w-2 h-2 rounded-full ${typeColor[event.type].dot}`} />
@@ -458,18 +463,29 @@ export default function CalendarPage() {
                         {event.time && (
                           <span className="text-xs text-gray-500 dark:text-gray-400">{event.time}</span>
                         )}
+                        {navPath && (
+                          <button
+                            onClick={() => router.push(navPath)}
+                            className={`ml-auto text-xs underline ${typeColor[event.type].text} hover:opacity-70 transition-opacity`}
+                          >
+                            詳細を見る →
+                          </button>
+                        )}
                       </div>
                       <p className={`text-sm font-medium ${typeColor[event.type].text}`}>{event.title}</p>
                       {/* Attendance buttons for MTG events */}
                       {mtgMatch && (
-                        <div className="flex items-center gap-2 mt-2">
-                          {(["出席", "欠席", "遅刻"] as const).map(status => {
+                        <div className="flex items-center gap-2 flex-wrap mt-2">
+                          {(attendanceStatuses as AttendanceStatus[]).map(status => {
                             const isActive = myStatus === status;
-                            const colors: Record<string, string> = {
-                              "出席": isActive ? "bg-green-600 text-white border-green-600" : "bg-white dark:bg-gray-700 text-green-700 dark:text-green-300 border-green-300 dark:border-green-600 hover:bg-green-50 dark:hover:bg-green-900/30",
-                              "欠席": isActive ? "bg-red-600 text-white border-red-600" : "bg-white dark:bg-gray-700 text-red-700 dark:text-red-300 border-red-300 dark:border-red-600 hover:bg-red-50 dark:hover:bg-red-900/30",
-                              "遅刻": isActive ? "bg-yellow-500 text-white border-yellow-500" : "bg-white dark:bg-gray-700 text-yellow-700 dark:text-yellow-300 border-yellow-300 dark:border-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/30",
+                            const colorMap: Record<string, { active: string; inactive: string }> = {
+                              "出席":             { active: "bg-green-600 text-white border-green-600", inactive: "bg-white dark:bg-gray-700 text-green-700 dark:text-green-300 border-green-300 dark:border-green-600 hover:bg-green-50 dark:hover:bg-green-900/30" },
+                              "対面で出席":       { active: "bg-green-600 text-white border-green-600", inactive: "bg-white dark:bg-gray-700 text-green-700 dark:text-green-300 border-green-300 dark:border-green-600 hover:bg-green-50 dark:hover:bg-green-900/30" },
+                              "オンラインで出席": { active: "bg-blue-600 text-white border-blue-600",   inactive: "bg-white dark:bg-gray-700 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30" },
+                              "欠席":             { active: "bg-red-600 text-white border-red-600",     inactive: "bg-white dark:bg-gray-700 text-red-700 dark:text-red-300 border-red-300 dark:border-red-600 hover:bg-red-50 dark:hover:bg-red-900/30" },
+                              "遅刻":             { active: "bg-yellow-500 text-white border-yellow-500", inactive: "bg-white dark:bg-gray-700 text-yellow-700 dark:text-yellow-300 border-yellow-300 dark:border-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/30" },
                             };
+                            const c = colorMap[status];
                             return (
                               <button
                                 key={status}
@@ -477,7 +493,7 @@ export default function CalendarPage() {
                                   e.stopPropagation();
                                   updateAttendance(mtgMatch.id, user.email, isActive ? "未回答" : status);
                                 }}
-                                className={`px-3 py-1 text-xs rounded-lg border transition-colors ${colors[status]}`}
+                                className={`px-3 py-1 text-xs rounded-lg border transition-colors ${isActive ? c.active : c.inactive}`}
                               >
                                 {status}
                               </button>
