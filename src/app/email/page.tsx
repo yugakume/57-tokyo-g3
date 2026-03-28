@@ -23,6 +23,7 @@ interface EmailSettings {
   taskDaysBefore: number;
   taskHour: number;
   taskMinute: number;
+  fromAddress: string; // 送信元メールアドレス（空欄 = 連携アカウントのアドレス）
 }
 
 const DEFAULT_SETTINGS: EmailSettings = {
@@ -34,6 +35,7 @@ const DEFAULT_SETTINGS: EmailSettings = {
   taskDaysBefore: 1,
   taskHour: 9,
   taskMinute: 0,
+  fromAddress: "",
 };
 
 interface SentLogEntry {
@@ -244,6 +246,7 @@ export default function EmailPage() {
           to: item.to,
           subject: item.subject,
           htmlBody: item.htmlBody,
+          from: currentSettings.fromAddress || undefined,
         });
         newEntries.push({
           id: item.logId,
@@ -406,11 +409,35 @@ export default function EmailPage() {
             )}
           </div>
 
+          {/* 送信元アドレス設定 */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+            <h2 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">送信元メールアドレス</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+              空欄の場合は連携したGoogleアカウントのアドレスで送信されます。<br />
+              支部メール（例: kanto3@dot-jp.or.jp）から送りたい場合は、<strong>そのアドレスでGmailを連携</strong>するか、Gmailの「他のアドレスからメールを送信」設定でエイリアスを追加してから入力してください。
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="email"
+                value={settings.fromAddress}
+                onChange={e => setSettings(prev => ({ ...prev, fromAddress: e.target.value }))}
+                placeholder="kanto3@dot-jp.or.jp（省略可）"
+                className="flex-1 px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400"
+              />
+              <button
+                onClick={() => handleSaveSettings(settings)}
+                className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+
           <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4">
             <h3 className="text-sm font-semibold text-blue-800 dark:text-blue-300 mb-2">自動リマインドについて</h3>
             <ul className="text-sm text-blue-700 dark:text-blue-400 space-y-1 list-disc ml-4">
               <li>Gmail連携済みの状態でアプリを開くと、設定した日時に自動でリマインドメールが送信されます</li>
-              <li>メールはあなたのGmailアカウントから送信されます（送信のみ・メール読み取り不可）</li>
+              <li>メールは連携したGoogleアカウント（または送信元アドレス）から送信されます</li>
               <li>一度送信したリマインドは重複して送信されません</li>
               <li>トークンは約1時間で期限切れになります。期限切れ後は再連携してください</li>
             </ul>

@@ -1288,11 +1288,13 @@ function BookingsTab({
         eventTypeLabel: EVENT_TYPE_LABELS[booking.eventType],
         meetLink: booking.meetLink,
       });
+      const emailSettings = (() => { try { return JSON.parse(localStorage.getItem("portal_email_settings") || "{}"); } catch { return {}; } })();
       await sendGmail({
         accessToken: gmailToken.accessToken,
         to: staff.email,
         subject: `【説明会リマインド】${slot.date} ${slot.startTime}〜 ${booking.studentName}さん`,
         htmlBody: html,
+        from: emailSettings.fromAddress || undefined,
       });
       setReminderSent(prev => new Set([...prev, booking.id]));
       setToast(`${staff.lastName}さんにリマインドを送信しました`);

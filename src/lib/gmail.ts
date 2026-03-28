@@ -24,22 +24,24 @@ export async function sendGmail({
   to,
   subject,
   htmlBody,
+  from,
 }: {
   accessToken: string;
   to: string | string[];
   subject: string;
   htmlBody: string;
+  from?: string; // 送信元アドレス（Gmail "Send as" 設定済みのアドレスのみ有効）
 }): Promise<void> {
   const toStr = Array.isArray(to) ? to.join(', ') : to;
-  const rawMessage = [
+  const headers: string[] = [
     `To: ${toStr}`,
     `Subject: ${mimeEncodeSubject(subject)}`,
     'MIME-Version: 1.0',
     'Content-Type: text/html; charset=UTF-8',
     'Content-Transfer-Encoding: 8bit',
-    '',
-    htmlBody,
-  ].join('\r\n');
+  ];
+  if (from) headers.splice(1, 0, `From: ${from}`);
+  const rawMessage = [...headers, '', htmlBody].join('\r\n');
 
   const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',

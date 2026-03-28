@@ -1070,11 +1070,13 @@ function MailtoModal({
         dueTime: task.dueTime,
         assigneeNames: names,
       });
+      const emailSettings = (() => { try { return JSON.parse(localStorage.getItem("portal_email_settings") || "{}"); } catch { return {}; } })();
       await sendGmail({
         accessToken: gmailToken.accessToken,
         to: emails,
         subject: `【Lueur】タスク: ${task.title}`,
         htmlBody: html,
+        from: emailSettings.fromAddress || undefined,
       });
       onClose();
     } catch (e) {
