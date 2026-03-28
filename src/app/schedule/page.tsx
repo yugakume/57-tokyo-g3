@@ -153,20 +153,20 @@ export default function SchedulePage() {
 // Tab 1: 空き日程（週間カレンダービュー）
 // =============================================
 
-// 30分刻みの時間スロット（9:00〜21:00 = 24行）
+// 30分刻みの時間スロット（0:00〜23:30 = 48行）
 const CALENDAR_TIMES: string[] = [];
-for (let h = 9; h <= 20; h++) {
+for (let h = 0; h <= 23; h++) {
   CALENDAR_TIMES.push(`${String(h).padStart(2, "0")}:00`);
   CALENDAR_TIMES.push(`${String(h).padStart(2, "0")}:30`);
 }
 
 function timeToIndex(time: string): number {
   const [h, m] = time.split(":").map(Number);
-  return (h - 9) * 2 + (m >= 30 ? 1 : 0);
+  return h * 2 + (m >= 30 ? 1 : 0);
 }
 
 function indexToTime(index: number): string {
-  const h = 9 + Math.floor(index / 2);
+  const h = Math.floor(index / 2);
   const m = index % 2 === 0 ? "00" : "30";
   return `${String(h).padStart(2, "0")}:${m}`;
 }
@@ -312,8 +312,8 @@ function SlotsTab({
         const startM = parseInt(ev.start.substring(14, 16));
         const endH = parseInt(ev.end.substring(11, 13));
         const endM = parseInt(ev.end.substring(14, 16));
-        const sIdx = Math.max(0, (startH - 9) * 2 + (startM >= 30 ? 1 : 0));
-        const eIdx = Math.min(CALENDAR_TIMES.length, (endH - 9) * 2 + (endM > 0 ? (endM >= 30 ? 2 : 1) : 0));
+        const sIdx = Math.max(0, startH * 2 + (startM >= 30 ? 1 : 0));
+        const eIdx = Math.min(CALENDAR_TIMES.length, endH * 2 + (endM > 0 ? (endM >= 30 ? 2 : 1) : 0));
         if (eIdx > sIdx) {
           existing.push({ ev, startIdx: sIdx, spanCount: eIdx - sIdx });
         }
@@ -482,7 +482,7 @@ function SlotsTab({
   const handleMobileTimeClick = (date: string, time: string) => {
     const [h, m] = time.split(":").map(Number);
     const endMin = h * 60 + m + 60;
-    if (endMin > 21 * 60) return;
+    if (endMin > 24 * 60) return;
     const endH = Math.floor(endMin / 60);
     const endM = endMin % 60;
     const endTimeStr = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
@@ -1363,7 +1363,7 @@ function BookingLinkBanner({ setToast }: { setToast: (msg: string) => void }) {
               {copiedType === type ? "✓" : "コピー"}
             </button>
             <a
-              href={`/book?type=${type}`}
+              href={origin ? getUrl(type) : `/book?type=${type}`}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors shrink-0"
