@@ -52,15 +52,15 @@ export function MeetingMinutesProvider({ children }: { children: ReactNode }) {
     const id = `minutes-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const newMinutes: MeetingMinutes = { ...m, id, createdAt: now, updatedAt: now };
     const { id: _id, ...data } = newMinutes;
-    // onSnapshot handles the state update via Firestore latency compensation
-    setDoc(doc(db, "meetingMinutes", id), data);
+    // JSON round-trip removes undefined fields (Firestore rejects undefined values)
+    setDoc(doc(db, "meetingMinutes", id), JSON.parse(JSON.stringify(data)));
   }, [isDemoUser]);
 
   const updateMinutes = useCallback((id: string, updates: Partial<MeetingMinutes>) => {
     if (isDemoUser) return;
     const updatedAt = new Date().toISOString();
-    // onSnapshot handles the state update via Firestore latency compensation
-    setDoc(doc(db, "meetingMinutes", id), { ...updates, updatedAt }, { merge: true });
+    // JSON round-trip removes undefined fields (Firestore rejects undefined values)
+    setDoc(doc(db, "meetingMinutes", id), JSON.parse(JSON.stringify({ ...updates, updatedAt })), { merge: true });
   }, [isDemoUser]);
 
   const deleteMinutes = useCallback((id: string) => {

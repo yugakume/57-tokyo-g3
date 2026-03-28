@@ -172,12 +172,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const addInstaAccount = useCallback(async (account: Omit<InstagramAccount, "id">) => {
     if (isDemoUser) return;
     const id = `insta-${Date.now()}`;
-    await setDoc(doc(db, "instaAccounts", id), { ...account, id });
+    // JSON round-trip removes undefined fields (Firestore rejects undefined values)
+    await setDoc(doc(db, "instaAccounts", id), JSON.parse(JSON.stringify({ ...account, id })));
   }, [isDemoUser]);
 
   const updateInstaAccount = useCallback(async (id: string, updates: Partial<InstagramAccount>) => {
     if (isDemoUser) return;
-    await updateDoc(doc(db, "instaAccounts", id), updates);
+    // JSON round-trip removes undefined fields (Firestore rejects undefined values)
+    await updateDoc(doc(db, "instaAccounts", id), JSON.parse(JSON.stringify(updates)));
   }, [isDemoUser]);
 
   const deleteInstaAccount = useCallback(async (id: string) => {
