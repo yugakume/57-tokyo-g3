@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
+import { createContext, useContext, useState, useEffect, useRef, ReactNode, useCallback } from "react";
 import type { MeetingMinutes } from "@/types";
 import { db } from "@/lib/firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
@@ -30,6 +30,8 @@ export function MeetingMinutesProvider({ children }: { children: ReactNode }) {
   const isDemoUser = user?.isDemoUser === true;
 
   const [minutes, setMinutes] = useState<MeetingMinutes[]>([]);
+  const minutesRef = useRef<MeetingMinutes[]>([]);
+  useEffect(() => { minutesRef.current = minutes; }, [minutes]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -47,45 +49,39 @@ export function MeetingMinutesProvider({ children }: { children: ReactNode }) {
   const addMinutes = useCallback((m: Omit<MeetingMinutes, "id" | "createdAt" | "updatedAt">) => {
     if (isDemoUser) return;
     const now = new Date().toISOString();
-    const newMinutes: MeetingMinutes = {
-      ...m,
-      id: `minutes-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      createdAt: now,
-      updatedAt: now,
-    };
-    setMinutes((prev) => [newMinutes, ...prev]);
-    const { id, ...data } = newMinutes;
+    const id = `minutes-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const newMinutes: MeetingMinutes = { ...m, id, createdAt: now, updatedAt: now };
+    const { id: _id, ...data } = newMinutes;
+    // onSnapshot handles the state update via Firestore latency compensation
     setDoc(doc(db, "meetingMinutes", id), data);
   }, [isDemoUser]);
 
   const updateMinutes = useCallback((id: string, updates: Partial<MeetingMinutes>) => {
     if (isDemoUser) return;
     const updatedAt = new Date().toISOString();
-    setMinutes((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates, updatedAt } : m)));
+    // onSnapshot handles the state update via Firestore latency compensation
     setDoc(doc(db, "meetingMinutes", id), { ...updates, updatedAt }, { merge: true });
   }, [isDemoUser]);
 
   const deleteMinutes = useCallback((id: string) => {
     if (isDemoUser) return;
-    setMinutes((prev) => prev.filter((m) => m.id !== id));
+    // onSnapshot handles the state update via Firestore latency compensation
     deleteDoc(doc(db, "meetingMinutes", id));
   }, [isDemoUser]);
 
   const updateAttendance = useCallback((id: string, email: string, status: "出席" | "欠席" | "遅刻" | "未回答") => {
     if (isDemoUser) return;
+    const target = minutesRef.current.find(m => m.id === id);
+    if (!target) return;
     const updatedAt = new Date().toISOString();
-    setMinutes((prev) => {
-      const target = prev.find(m => m.id === id);
-      if (!target) return prev;
-      const attendance = { ...(target.attendance || {}) };
-      if (status === "未回答") {
-        delete attendance[email];
-      } else {
-        attendance[email] = status;
-      }
-      setDoc(doc(db, "meetingMinutes", id), { attendance, updatedAt }, { merge: true });
-      return prev.map((m) => m.id === id ? { ...m, attendance, updatedAt } : m);
-    });
+    const attendance = { ...(target.attendance || {}) };
+    if (status === "未回答") {
+      delete attendance[email];
+    } else {
+      attendance[email] = status;
+    }
+    // onSnapshot handles the state update via Firestore latency compensation
+    setDoc(doc(db, "meetingMinutes", id), { attendance, updatedAt }, { merge: true });
   }, [isDemoUser]);
 
   return (

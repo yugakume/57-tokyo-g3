@@ -630,6 +630,7 @@ function MeetingModal({
       content,
       createdBy: initial?.createdBy ?? userEmail,
     });
+    onClose();
   };
 
   return (
