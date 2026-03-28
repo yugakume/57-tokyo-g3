@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
-import { EVENT_TYPE_LABELS } from "@/types";
+import { EVENT_TYPE_LABELS, EVENT_TYPE_REQUIRED_ROLE_KEYWORDS } from "@/types";
 import type { EventType, TimeSlot, Booking, StaffProfile, StaffRole } from "@/types";
 import { TrashIcon, EditIcon, CheckIcon, CalendarIcon, CloseIcon, CopyIcon, ExternalLinkIcon, ChevronIcon } from "@/components/Icons";
 import Toast from "@/components/Toast";
@@ -92,7 +92,7 @@ export default function SchedulePage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
-      <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">スケジュール管理</h1>
+      <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">日程調整</h1>
 
       {/* Booking link for students */}
       <BookingLinkBanner setToast={setToast} />
@@ -117,6 +117,7 @@ export default function SchedulePage() {
       {activeTab === "slots" && (
         <SlotsTab
           myProfile={myProfile}
+          staffRoles={staffRoles}
           timeSlots={timeSlots}
           bookings={bookings}
           addTimeSlot={addTimeSlot}
@@ -170,8 +171,12 @@ function indexToTime(index: number): string {
   return `${String(h).padStart(2, "0")}:${m}`;
 }
 
+// 空き枠登録可能なEventType（meeting除外）
+const SLOT_EVENT_TYPES: EventType[] = ["orientation", "hearing", "selection", "other"];
+
 function SlotsTab({
   myProfile,
+  staffRoles,
   timeSlots,
   bookings,
   addTimeSlot,
@@ -183,6 +188,7 @@ function SlotsTab({
   isDemoMode,
 }: {
   myProfile: StaffProfile | undefined;
+  staffRoles: StaffRole[];
   timeSlots: TimeSlot[];
   bookings: Booking[];
   addTimeSlot: (slot: Omit<TimeSlot, "id">) => void;
@@ -197,8 +203,26 @@ function SlotsTab({
   const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [weekOffset, setWeekOffset] = useState(0);
   const [eventType, setEventType] = useState<EventType>("orientation");
+  const [customEventName, setCustomEventName] = useState("");
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [calendarLoading, setCalendarLoading] = useState(false);
+
+  // ロールに基づいて使用可能なイベント種別を計算
+  const availableEventTypes = useMemo(() => {
+    const myRoleNames = staffRoles
+      .filter(r => myProfile?.roleIds.includes(r.id))
+      .map(r => r.name);
+    return SLOT_EVENT_TYPES.filter(t => {
+      const keywords = EVENT_TYPE_REQUIRED_ROLE_KEYWORDS[t];
+      if (!keywords) return true; // 制限なし（全員OK）
+      return myRoleNames.some(rn => keywords.some(kw => rn.includes(kw)));
+    });
+  }, [staffRoles, myProfile]);
+
+  // 現在のeventTypeが使用不可なら最初の使用可能なものに切り替え
+  const validEventType = availableEventTypes.includes(eventType)
+    ? eventType
+    : (availableEventTypes[0] ?? "selection");
 
   // Drag state
   const [isDragging, setIsDragging] = useState(false);
@@ -416,15 +440,20 @@ function SlotsTab({
 
   const handleConfirmAdd = () => {
     if (!confirmDialog || !myProfile) return;
+    if (validEventType === "other" && !customEventName.trim()) {
+      return; // 面談名必須
+    }
     addTimeSlot({
       staffId: myProfile.id,
       date: confirmDialog.date,
       startTime: confirmDialog.startTime,
       endTime: confirmDialog.endTime,
-      eventType,
+      eventType: validEventType,
+      customEventName: validEventType === "other" ? customEventName.trim() : undefined,
       isBooked: false,
     });
     setToast("空き枠を追加しました");
+    setCustomEventName("");
     setConfirmDialog(null);
   };
 
@@ -522,12 +551,12 @@ function SlotsTab({
           <div className="flex items-center gap-1.5">
             <label className="text-xs text-gray-500 dark:text-gray-400">種別:</label>
             <select
-              value={eventType}
+              value={validEventType}
               onChange={e => setEventType(e.target.value as EventType)}
               className="text-xs px-2 py-1 border border-gray-200 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
-              {(Object.entries(EVENT_TYPE_LABELS) as [EventType, string][]).map(([key, label]) => (
-                <option key={key} value={key}>{label}</option>
+              {availableEventTypes.map(key => (
+                <option key={key} value={key}>{EVENT_TYPE_LABELS[key]}</option>
               ))}
             </select>
           </div>
@@ -903,25 +932,38 @@ function SlotsTab({
               <div className="mb-4">
                 <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">イベント種別</label>
                 <select
-                  value={eventType}
+                  value={validEventType}
                   onChange={e => setEventType(e.target.value as EventType)}
                   className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  {(Object.entries(EVENT_TYPE_LABELS) as [EventType, string][]).map(([key, label]) => (
-                    <option key={key} value={key}>{label}</option>
+                  {availableEventTypes.map(key => (
+                    <option key={key} value={key}>{EVENT_TYPE_LABELS[key]}</option>
                   ))}
                 </select>
               </div>
+              {validEventType === "other" && (
+                <div className="mb-4">
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">面談名（必須）</label>
+                  <input
+                    type="text"
+                    value={customEventName}
+                    onChange={e => setCustomEventName(e.target.value)}
+                    placeholder="例: 個別キャリア相談"
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              )}
               <div className="flex gap-2">
                 <button
-                  onClick={() => setConfirmDialog(null)}
+                  onClick={() => { setConfirmDialog(null); setCustomEventName(""); }}
                   className="flex-1 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                 >
                   キャンセル
                 </button>
                 <button
                   onClick={handleConfirmAdd}
-                  className="flex-1 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                  disabled={validEventType === "other" && !customEventName.trim()}
+                  className="flex-1 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   追加する
                 </button>
@@ -1268,19 +1310,26 @@ function BookingsTab({
 // 予約リンク共有バナー
 // =============================================
 
-function BookingLinkBanner({ setToast }: { setToast: (msg: string) => void }) {
-  const [copied, setCopied] = useState(false);
-  const basePath = process.env.NODE_ENV === "production" ? "/57-tokyo-g3" : "";
-  const bookingUrl = typeof window !== "undefined"
-    ? `${window.location.origin}${basePath}/book`
-    : "/book";
+const BOOKING_LINK_TYPES: { type: EventType; label: string; color: string }[] = [
+  { type: "orientation", label: "説明会",                 color: "blue"   },
+  { type: "hearing",     label: "一次選考会前ヒアリング", color: "green"  },
+  { type: "selection",   label: "二次選考会事前面談",     color: "purple" },
+  { type: "other",       label: "その他面談",             color: "gray"   },
+];
 
-  const handleCopy = async () => {
+function BookingLinkBanner({ setToast }: { setToast: (msg: string) => void }) {
+  const [copiedType, setCopiedType] = useState<string | null>(null);
+  const basePath = process.env.NODE_ENV === "production" ? "/57-tokyo-g3" : "";
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+
+  const getUrl = (type: EventType) => `${origin}${basePath}/book?type=${type}`;
+
+  const handleCopy = async (type: EventType) => {
     try {
-      await navigator.clipboard.writeText(bookingUrl);
-      setCopied(true);
-      setToast("予約URLをコピーしました");
-      setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(getUrl(type));
+      setCopiedType(type);
+      setToast(`${EVENT_TYPE_LABELS[type]}の予約URLをコピーしました`);
+      setTimeout(() => setCopiedType(null), 2000);
     } catch {
       setToast("コピーに失敗しました");
     }
@@ -1288,39 +1337,42 @@ function BookingLinkBanner({ setToast }: { setToast: (msg: string) => void }) {
 
   return (
     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200 p-4 mb-5">
-      <div className="flex items-start gap-3">
-        <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center shrink-0 mt-0.5">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shrink-0">
           <ExternalLinkIcon className="w-4 h-4 text-white" />
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">学生向け予約ページ</p>
-          <p className="text-xs text-gray-500 mb-2">以下のリンクを学生に共有してください。ログイン不要で予約できます。</p>
-          <div className="flex items-center gap-2">
-            <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 px-3 py-2 text-xs text-gray-700 dark:text-gray-300 font-mono truncate">
-              {bookingUrl}
+        <div>
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">学生向け予約ページ</p>
+          <p className="text-xs text-gray-500">各リンクを学生に共有してください。ログイン不要で予約できます。</p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {BOOKING_LINK_TYPES.map(({ type, label }) => (
+          <div key={type} className="flex items-center gap-2">
+            <span className="text-xs text-gray-600 dark:text-gray-400 w-36 shrink-0 font-medium">{label}</span>
+            <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 px-2 py-1.5 text-xs text-gray-600 dark:text-gray-400 font-mono truncate min-w-0">
+              {origin ? getUrl(type) : `/book?type=${type}`}
             </div>
             <button
-              onClick={handleCopy}
-              className={`flex items-center gap-1 px-3 py-2 text-xs font-medium rounded-lg transition-colors shrink-0 ${
-                copied
-                  ? "bg-green-600 text-white"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
+              onClick={() => handleCopy(type)}
+              className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors shrink-0 ${
+                copiedType === type ? "bg-green-600 text-white" : "bg-blue-600 text-white hover:bg-blue-700"
               }`}
             >
-              <CopyIcon className="w-3.5 h-3.5" />
-              {copied ? "コピー済み" : "URLをコピー"}
+              <CopyIcon className="w-3 h-3" />
+              {copiedType === type ? "✓" : "コピー"}
             </button>
             <a
-              href="/book"
+              href={`/book?type=${type}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 px-3 py-2 text-xs font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors shrink-0"
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors shrink-0"
             >
-              <ExternalLinkIcon className="w-3.5 h-3.5" />
+              <ExternalLinkIcon className="w-3 h-3" />
               開く
             </a>
           </div>
-        </div>
+        ))}
       </div>
     </div>
   );

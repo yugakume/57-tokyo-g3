@@ -109,10 +109,17 @@ export type EventType = "orientation" | "hearing" | "selection" | "meeting" | "o
 
 export const EVENT_TYPE_LABELS: Record<EventType, string> = {
   orientation: "説明会",
-  hearing: "ヒアリング",
-  selection: "1次選考会",
+  hearing: "一次選考会前ヒアリング",
+  selection: "二次選考会事前面談",
   meeting: "ミーティング",
-  other: "その他",
+  other: "その他面談",
+};
+
+// 空き枠登録に必要なロール名キーワード（含まれていれば許可）
+// 定義がない種別は誰でも登録可能
+export const EVENT_TYPE_REQUIRED_ROLE_KEYWORDS: Partial<Record<EventType, string[]>> = {
+  orientation: ["説明会"],
+  hearing: ["ヒアリング"],
 };
 
 export interface StaffProfile {
@@ -139,6 +146,7 @@ export interface TimeSlot {
   startTime: string;      // "10:00"
   endTime: string;        // "11:00"
   eventType: EventType;
+  customEventName?: string;  // EventType "other" の場合の面談名
   isBooked: boolean;
   bookingId?: string;
 }

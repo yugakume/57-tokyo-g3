@@ -204,7 +204,8 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     const newSlot = { ...slot, id };
     setTimeSlots(prev => [...prev, newSlot]);
     const { id: _id, ...data } = newSlot;
-    setDoc(doc(db, "timeSlots", id), data);
+    // JSON round-trip removes undefined fields (Firestore rejects undefined values)
+    setDoc(doc(db, "timeSlots", id), JSON.parse(JSON.stringify(data)));
   }, [isDemoUser]);
 
   const addTimeSlots = useCallback((slots: Omit<TimeSlot, "id">[]) => {
@@ -214,7 +215,8 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     const batch = writeBatch(db);
     newSlots.forEach(s => {
       const { id, ...data } = s;
-      batch.set(doc(db, "timeSlots", id), data);
+      // JSON round-trip removes undefined fields (Firestore rejects undefined values)
+      batch.set(doc(db, "timeSlots", id), JSON.parse(JSON.stringify(data)));
     });
     batch.commit();
   }, [isDemoUser]);

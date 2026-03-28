@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useSchedule } from "@/contexts/ScheduleContext";
 import { EVENT_TYPE_LABELS } from "@/types";
-import type { StaffProfile, TimeSlot } from "@/types";
+import type { EventType, StaffProfile, TimeSlot } from "@/types";
 
 // ─── Helpers ───────────────────────────────────────────────
 const GRADE_FILTERS = ["すべて", "1年", "2年", "3年", "4年"] as const;
@@ -81,8 +82,26 @@ function StepIndicator({ current }: { current: number }) {
   );
 }
 
+const VALID_BOOKING_TYPES: EventType[] = ["orientation", "hearing", "selection", "other"];
+
 // ─── Main page ─────────────────────────────────────────────
 export default function BookPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <BookPageContent />
+    </Suspense>
+  );
+}
+
+function BookPageContent() {
+  const searchParams = useSearchParams();
+  const typeParam = searchParams.get("type") as EventType | null;
+  const activeType: EventType = typeParam && VALID_BOOKING_TYPES.includes(typeParam) ? typeParam : "orientation";
+
   const { staffProfiles, timeSlots, staffRoles, createBooking } = useSchedule();
 
   // Filters
@@ -108,10 +127,10 @@ export default function BookPage() {
     return m;
   }, [staffProfiles]);
 
-  // Available slots (not booked, orientation only)
+  // Available slots (not booked, filtered by activeType)
   const availableSlots = useMemo(() => {
-    return timeSlots.filter((ts) => !ts.isBooked && ts.eventType === "orientation");
-  }, [timeSlots]);
+    return timeSlots.filter((ts) => !ts.isBooked && ts.eventType === activeType);
+  }, [timeSlots, activeType]);
 
   // Filtered slots
   const filteredSlots = useMemo(() => {
@@ -177,7 +196,7 @@ export default function BookPage() {
         studentName: studentName.trim(),
         studentEmail: studentEmail.trim(),
         selectedSlotIds,
-        eventType: "orientation",
+        eventType: activeType,
       });
       setBookingNumber(result.bookingNumber);
     } catch {
@@ -192,7 +211,7 @@ export default function BookPage() {
     return (
       <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white dark:from-gray-950 dark:to-gray-900">
         <div className="max-w-lg mx-auto px-4 py-8">
-          <Header />
+          <Header eventType={activeType} />
           <StepIndicator current={4} />
 
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6 text-center">
@@ -236,7 +255,7 @@ export default function BookPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white dark:from-gray-950 dark:to-gray-900">
       <div className="max-w-lg mx-auto px-4 py-8">
-        <Header />
+        <Header eventType={activeType} />
         <StepIndicator current={selectedSlotIds.length > 0 ? 3 : groupedByDate.length > 0 ? 2 : 1} />
 
         {/* Step 1: Filters */}
@@ -352,6 +371,12 @@ export default function BookPage() {
                           <div className="font-mono text-sm font-bold text-gray-900 dark:text-gray-100 whitespace-nowrap">
                             {slot.startTime}〜{slot.endTime}
                           </div>
+                          {/* カスタム面談名（その他面談の場合） */}
+                          {slot.customEventName && (
+                            <div className="text-xs text-indigo-600 dark:text-indigo-400 font-medium">
+                              {slot.customEventName}
+                            </div>
+                          )}
 
                           {/* Staff info */}
                           {staff && (
@@ -458,7 +483,8 @@ export default function BookPage() {
 }
 
 // ─── Header component ──────────────────────────────────────
-function Header() {
+function Header({ eventType }: { eventType: EventType }) {
+  const typeLabel = EVENT_TYPE_LABELS[eventType] ?? "予約";
   return (
     <div className="text-center mb-8">
       <div className="inline-flex items-center gap-2 mb-3">
@@ -467,7 +493,7 @@ function Header() {
         </div>
         <span className="font-bold text-gray-900 dark:text-gray-100 text-xl">Lueur</span>
       </div>
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">インターン説明会 予約</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">{typeLabel} 予約</h1>
       <p className="text-sm text-gray-500">ご希望の日時を選んでお申し込みください</p>
     </div>
   );

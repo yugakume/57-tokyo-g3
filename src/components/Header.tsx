@@ -125,7 +125,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/news", label: "お知らせ", icon: BellIcon },
     { href: "/links", label: "業務リンク集", icon: LinkListIcon },
     { href: "/accounts", label: "アカウント情報", icon: KeyIcon },
-    { href: "/schedule", label: "スケジュール", icon: CalendarIcon },
+    { href: "/schedule", label: "日程調整", icon: CalendarIcon },
     { href: "/meeting", label: "ミーティング", icon: DocumentIcon },
     { href: "/expenses", label: "交通費", icon: CurrencyIcon },
     { href: "/tasks", label: "タスク", icon: ClipboardIcon },
