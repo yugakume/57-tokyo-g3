@@ -137,6 +137,7 @@ export interface StaffProfile {
   university?: string;     // 大学名
   faculty?: string;        // 学部・学科
   photoURL?: string;       // 顔写真（base64 data URL）
+  walletAddress?: string;  // MetaMaskウォレットアドレス（0x...）
 }
 
 export interface TimeSlot {

@@ -6,6 +6,17 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSchedule } from "@/contexts/ScheduleContext";
 import { SearchIcon, CloseIcon } from "@/components/Icons";
 import type { StaffProfile } from "@/types";
+import Toast from "@/components/Toast";
+
+// MetaMask window.ethereum の型定義
+declare global {
+  interface Window {
+    ethereum?: {
+      request: (args: { method: string; params?: unknown[] }) => Promise<string[]>;
+      isMetaMask?: boolean;
+    };
+  }
+}
 
 // =============================================
 // バッジカラー（ロールごとに色を割り当て）
@@ -55,6 +66,8 @@ export default function MembersPage() {
   const { staffProfiles, staffRoles, updateStaffProfile } = useSchedule();
   const [search, setSearch] = useState("");
   const [editingProfile, setEditingProfile] = useState<StaffProfile | null>(null);
+  const [walletModalProfile, setWalletModalProfile] = useState<StaffProfile | null>(null);
+  const [toast, setToast] = useState("");
 
   useEffect(() => {
     if (!isLoading && !user) router.push("/");
@@ -154,6 +167,20 @@ export default function MembersPage() {
                       <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
                         <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                    </button>
+                  )}
+                  {/* 自分のカードにウォレット登録ボタン（非管理者でも） */}
+                  {!isAdmin && user?.email === profile.email && (
+                    <button
+                      onClick={() => setWalletModalProfile(profile)}
+                      className="absolute top-3 right-3 p-1.5 text-gray-400 hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/30 rounded-lg transition-colors"
+                      title="ウォレットアドレスを登録"
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="2" y="7" width="20" height="14" rx="2"/>
+                        <path d="M16 3H8L2 7h20l-6-4z"/>
+                        <circle cx="12" cy="14" r="2"/>
                       </svg>
                     </button>
                   )}
@@ -261,6 +288,36 @@ export default function MembersPage() {
                         {profile.email}
                       </a>
                     </div>
+
+                    {/* ウォレットアドレス（管理者のみ表示 or 自分のカード） */}
+                    {(isAdmin || user?.email === profile.email) && (
+                      <div className="flex items-center gap-2">
+                        <svg className="w-4 h-4 text-orange-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <rect x="2" y="7" width="20" height="14" rx="2"/>
+                          <path d="M16 3H8L2 7h20l-6-4z"/>
+                          <circle cx="12" cy="14" r="2"/>
+                        </svg>
+                        {profile.walletAddress ? (
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(profile.walletAddress!);
+                              setToast("コピーしました");
+                            }}
+                            className="truncate text-xs text-orange-600 dark:text-orange-400 font-mono hover:underline"
+                            title={profile.walletAddress}
+                          >
+                            {profile.walletAddress.slice(0, 6)}...{profile.walletAddress.slice(-4)}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setWalletModalProfile(profile)}
+                            className="text-xs text-gray-400 dark:text-gray-500 hover:text-orange-500 transition-colors"
+                          >
+                            {user?.email === profile.email ? "ウォレットを登録する →" : "未登録"}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -268,6 +325,9 @@ export default function MembersPage() {
           </div>
         )}
       </div>
+
+      {/* Toast */}
+      {toast && <Toast message={toast} onClose={() => setToast("")} />}
 
       {/* 管理者用 編集モーダル */}
       {editingProfile && (
@@ -277,8 +337,22 @@ export default function MembersPage() {
           onSave={(updates) => {
             updateStaffProfile(editingProfile.id, updates);
             setEditingProfile(null);
+            setToast("プロフィールを更新しました");
           }}
           onClose={() => setEditingProfile(null)}
+        />
+      )}
+
+      {/* ウォレット登録モーダル */}
+      {walletModalProfile && (
+        <WalletModal
+          profile={walletModalProfile}
+          onSave={(address) => {
+            updateStaffProfile(walletModalProfile.id, { walletAddress: address || undefined });
+            setWalletModalProfile(null);
+            setToast(address ? "ウォレットアドレスを登録しました" : "ウォレットアドレスを削除しました");
+          }}
+          onClose={() => setWalletModalProfile(null)}
         />
       )}
     </div>
@@ -316,10 +390,11 @@ function EditProfileModal({
   const [birthday, setBirthday] = useState(profile.birthday ?? "");
   const [university, setUniversity] = useState(profile.university ?? "");
   const [faculty, setFaculty] = useState(profile.faculty ?? "");
+  const [walletAddress, setWalletAddress] = useState(profile.walletAddress ?? "");
 
   const handleSubmit = () => {
     const fullName = [lastName, firstName].filter(Boolean).join(" ");
-    onSave({ lastName, firstName, fullName, furigana, grade, gender, roleIds, nearestStation, birthday: birthday || undefined, university, faculty });
+    onSave({ lastName, firstName, fullName, furigana, grade, gender, roleIds, nearestStation, birthday: birthday || undefined, university, faculty, walletAddress: walletAddress || undefined });
   };
 
   const toggleRole = (id: string) => {
@@ -426,12 +501,172 @@ function EditProfileModal({
             </div>
           )}
 
+          {/* ウォレットアドレス（管理者が直接編集） */}
+          <div>
+            <label className={labelCls}>MetaMaskウォレットアドレス</label>
+            <input
+              type="text"
+              value={walletAddress}
+              onChange={e => setWalletAddress(e.target.value)}
+              className={inputCls}
+              placeholder="0x..."
+            />
+          </div>
+
           {/* ボタン */}
           <div className="flex gap-2 pt-2">
             <button onClick={onClose} className="flex-1 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
               キャンセル
             </button>
             <button onClick={handleSubmit} className="flex-1 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+              保存
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================
+// ウォレット登録モーダル（各自が自分のを登録）
+// =============================================
+
+function WalletModal({
+  profile,
+  onSave,
+  onClose,
+}: {
+  profile: StaffProfile;
+  onSave: (address: string) => void;
+  onClose: () => void;
+}) {
+  const [address, setAddress] = useState(profile.walletAddress ?? "");
+  const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [onClose]);
+
+  const connectMetaMask = async () => {
+    if (typeof window.ethereum === "undefined") {
+      setError("MetaMaskがインストールされていません。手動で入力してください。");
+      return;
+    }
+    setConnecting(true);
+    setError("");
+    try {
+      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      if (accounts && accounts[0]) {
+        setAddress(accounts[0]);
+      }
+    } catch {
+      setError("MetaMaskの接続をキャンセルしました。");
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const isValidAddress = !address || /^0x[0-9a-fA-F]{40}$/.test(address);
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+            <svg className="w-5 h-5 text-orange-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="2" y="7" width="20" height="14" rx="2"/>
+              <path d="M16 3H8L2 7h20l-6-4z"/>
+              <circle cx="12" cy="14" r="2"/>
+            </svg>
+            ウォレットアドレスを登録
+          </h3>
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
+            <CloseIcon className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            MetaMaskのウォレットアドレスを登録してください。管理者のみ閲覧できます。
+          </p>
+
+          {/* MetaMask接続ボタン */}
+          <button
+            onClick={connectMetaMask}
+            disabled={connecting}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 35 33" fill="none">
+              <path d="M32.9 1L19.4 10.7l2.4-5.7L32.9 1z" fill="#E17726"/>
+              <path d="M2.1 1l13.4 9.8-2.3-5.8L2.1 1z" fill="#E27625"/>
+              <path d="M28.2 23.5l-3.6 5.5 7.7 2.1 2.2-7.4-6.3-.2z" fill="#E27625"/>
+              <path d="M.9 23.7l2.2 7.4 7.7-2.1-3.6-5.5-6.3.2z" fill="#E27625"/>
+              <path d="M10.4 14.5l-2.1 3.2 7.5.3-.3-8-5.1 4.5z" fill="#E27625"/>
+              <path d="M24.6 14.5l-5.2-4.6-.2 8.1 7.5-.3-2.1-3.2z" fill="#E27625"/>
+              <path d="M10.8 29l4.5-2.2-3.9-3-0.6 5.2z" fill="#E27625"/>
+              <path d="M19.7 26.8l4.5 2.2-.6-5.2-3.9 3z" fill="#E27625"/>
+            </svg>
+            {connecting ? "接続中..." : "MetaMaskで接続する"}
+          </button>
+
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-600" />
+            <span className="text-xs text-gray-400">または手動入力</span>
+            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-600" />
+          </div>
+
+          {/* 手動入力 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              ウォレットアドレス
+            </label>
+            <input
+              type="text"
+              value={address}
+              onChange={e => { setAddress(e.target.value); setError(""); }}
+              placeholder="0x..."
+              className={`w-full px-3 py-2 border rounded-lg text-sm font-mono bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-orange-500 ${
+                !isValidAddress ? "border-red-400" : "border-gray-200 dark:border-gray-600"
+              }`}
+            />
+            {!isValidAddress && (
+              <p className="text-xs text-red-500 mt-1">有効なアドレスを入力してください（0x + 40文字の16進数）</p>
+            )}
+          </div>
+
+          {error && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 p-2 rounded-lg">{error}</p>
+          )}
+
+          {/* 現在の登録アドレス */}
+          {profile.walletAddress && (
+            <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">現在登録中</p>
+              <p className="text-xs font-mono text-gray-700 dark:text-gray-300 break-all">{profile.walletAddress}</p>
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            {profile.walletAddress && (
+              <button
+                onClick={() => onSave("")}
+                className="px-4 py-2 text-sm border border-red-200 text-red-500 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              >
+                削除
+              </button>
+            )}
+            <button onClick={onClose} className="flex-1 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+              キャンセル
+            </button>
+            <button
+              onClick={() => { if (isValidAddress) onSave(address); }}
+              disabled={!isValidAddress}
+              className="flex-1 py-2 text-sm bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white rounded-lg transition-colors"
+            >
               保存
             </button>
           </div>
